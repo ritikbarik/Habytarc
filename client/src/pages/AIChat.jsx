@@ -2,6 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { clearAIChatHistory, createHabit, deleteHabit, getAIChatHistory, getUserHabits, getTrackingForDate, saveAIChatMessage } from '../utils/firebaseService';
 import { getDateString } from '../utils/dateUtils';
 
+const AI_API_BASE_URL = String(import.meta.env.VITE_AI_API_BASE_URL || '').trim();
+const CHAT_ENDPOINT = AI_API_BASE_URL
+  ? `${AI_API_BASE_URL.replace(/\/+$/, '')}/api/chat`
+  : '/api/chat';
+
 function AIChat({ user, userData }) {
   const defaultAssistantMessage = {
     role: 'assistant',
@@ -200,7 +205,7 @@ function AIChat({ user, userData }) {
     }
 
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetch(CHAT_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -214,7 +219,20 @@ function AIChat({ user, userData }) {
         })
       });
 
-      const data = await response.json();
+      const raw = await response.text();
+      let data = null;
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        data = null;
+      }
+
+      if (!data) {
+        throw new Error(
+          'AI server returned non-JSON response. If deployed frontend only, deploy server.mjs and set VITE_AI_API_BASE_URL.'
+        );
+      }
+
       if (!response.ok) {
         throw new Error(data?.error || data?.code || 'AI request failed');
       }
