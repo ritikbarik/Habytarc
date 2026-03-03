@@ -79,6 +79,7 @@ const buildSystemPrompt = (context = {}) => {
   const name = context?.name || 'User';
   const activeHabits = Number(context?.activeHabits || 0);
   const completedCount = Number(context?.completedCount || 0);
+  const pendingCount = Number(context?.pendingCount || 0);
   const cheatDay = context?.cheatDay || 'sunday';
 
   return [
@@ -86,7 +87,7 @@ const buildSystemPrompt = (context = {}) => {
     'Give practical, concise guidance rooted in Atomic Habits principles.',
     'Use bullet points only when needed.',
     'Avoid medical, legal, or financial claims.',
-    `User: ${name}. Active habits: ${activeHabits}. Completed today: ${completedCount}. Cheat day: ${cheatDay}.`,
+    `User: ${name}. Active habits: ${activeHabits}. Completed today: ${completedCount}. Pending work: ${pendingCount}. Cheat day: ${cheatDay}.`,
     'Always finish with one specific next action the user can do now.'
   ].join(' ');
 };

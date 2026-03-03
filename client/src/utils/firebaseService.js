@@ -18,6 +18,26 @@ import { db } from '../config/firebase';
 
 const getTrackingDocId = (uid, date) => `v2_${uid}_${date}`;
 
+const upsertTrackingDoc = async (trackingRef, payload) => {
+  try {
+    await updateDoc(trackingRef, payload);
+  } catch (error) {
+    const code = String(error?.code || '').toLowerCase();
+    const message = String(error?.message || '').toLowerCase();
+    const isMissingDocError =
+      code === 'not-found' ||
+      code === 'firestore/not-found' ||
+      message.includes('no document to update');
+
+    if (isMissingDocError) {
+      await setDoc(trackingRef, payload);
+      return;
+    }
+
+    throw error;
+  }
+};
+
 // User Services
 export const createUserProfile = async (uid, userData) => {
   await setDoc(doc(db, 'users', uid), {
@@ -95,32 +115,117 @@ export const saveTracking = async (uid, date, habitId, completed) => {
   const trackingRef = doc(db, 'tracking', getTrackingDocId(uid, date));
 
   try {
-    await updateDoc(trackingRef, {
+    await upsertTrackingDoc(trackingRef, {
       userId: uid,
       date,
-      [`habits.${habitId}`]: completed
+      [`habits.${habitId}`]: completed,
+      [`dayStatus.${habitId}`]: completed ? 'completed' : 'pending'
     });
   } catch (error) {
-    // If the daily tracking doc does not exist yet, create it.
-    const code = String(error?.code || '').toLowerCase();
-    const message = String(error?.message || '').toLowerCase();
-    const isMissingDocError =
-      code === 'not-found' ||
-      code === 'firestore/not-found' ||
-      message.includes('no document to update');
-
-    if (isMissingDocError) {
-      await setDoc(trackingRef, {
-        userId: uid,
-        date,
-        habits: { [habitId]: completed }
-      });
-      return;
-    }
-
     console.error('saveTracking failed:', error);
     throw error;
   }
+};
+
+export const getTrackingDocForDate = async (uid, date) => {
+  const currentDoc = await getDoc(doc(db, 'tracking', getTrackingDocId(uid, date)));
+  if (currentDoc.exists()) {
+    const data = currentDoc.data();
+    return {
+      habits: data.habits || {},
+      dayStatus: data.dayStatus || {},
+      pendingTasks: data.pendingTasks || {}
+    };
+  }
+
+  const legacyDoc = await getDoc(doc(db, 'tracking', `${uid}_${date}`));
+  if (legacyDoc.exists()) {
+    const data = legacyDoc.data();
+    return {
+      habits: data.habits || {},
+      dayStatus: data.dayStatus || {},
+      pendingTasks: data.pendingTasks || {}
+    };
+  }
+
+  return { habits: {}, dayStatus: {}, pendingTasks: {} };
+};
+
+export const setHabitDayStatus = async (uid, date, habitId, status) => {
+  const trackingRef = doc(db, 'tracking', getTrackingDocId(uid, date));
+  const normalized = String(status || '').toLowerCase();
+  await upsertTrackingDoc(trackingRef, {
+    userId: uid,
+    date,
+    [`dayStatus.${habitId}`]: normalized,
+    ...(normalized === 'completed'
+      ? { [`habits.${habitId}`]: true }
+      : { [`habits.${habitId}`]: false })
+  });
+};
+
+export const upsertPendingTask = async (uid, sourceDate, task) => {
+  if (!task?.habitId || !task?.dueDate || !sourceDate) {
+    throw new Error('Missing pending task fields');
+  }
+
+  const trackingRef = doc(db, 'tracking', getTrackingDocId(uid, sourceDate));
+  const taskId = `pt_${task.habitId}_${sourceDate}`;
+  const createdAtMs = Date.now();
+  const payload = {
+    id: taskId,
+    habitId: task.habitId,
+    habitName: task.habitName || 'Habit',
+    sourceDate,
+    dueDate: task.dueDate,
+    status: 'pending',
+    createdAtMs
+  };
+
+  await upsertTrackingDoc(trackingRef, {
+    userId: uid,
+    date: sourceDate,
+    [`pendingTasks.${taskId}`]: payload
+  });
+
+  return payload;
+};
+
+export const resolvePendingTask = async (uid, sourceDate, taskId, status = 'done') => {
+  const trackingRef = doc(db, 'tracking', getTrackingDocId(uid, sourceDate));
+  await upsertTrackingDoc(trackingRef, {
+    userId: uid,
+    date: sourceDate,
+    [`pendingTasks.${taskId}.status`]: status,
+    [`pendingTasks.${taskId}.resolvedAtMs`]: Date.now()
+  });
+};
+
+export const getPendingTasksUpToDate = async (uid, date) => {
+  const trackingQuery = query(
+    collection(db, 'tracking'),
+    where('userId', '==', uid)
+  );
+  const snapshot = await getDocs(trackingQuery);
+  const dueBy = String(date || '');
+  const pending = [];
+
+  snapshot.docs.forEach((item) => {
+    const data = item.data();
+    const pendingMap = data?.pendingTasks || {};
+    Object.values(pendingMap).forEach((task) => {
+      if (!task || task.status !== 'pending') return;
+      if (dueBy && String(task.dueDate || '') > dueBy) return;
+      pending.push(task);
+    });
+  });
+
+  return pending.sort((a, b) => {
+    const dueA = String(a.dueDate || '');
+    const dueB = String(b.dueDate || '');
+    if (dueA !== dueB) return dueA.localeCompare(dueB);
+    return Number(a.createdAtMs || 0) - Number(b.createdAtMs || 0);
+  });
 };
 
 export const getTrackingForDate = async (uid, date) => {

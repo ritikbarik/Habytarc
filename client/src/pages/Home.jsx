@@ -1,7 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { subscribeToHabits, getTrackingForDate, saveTracking } from '../utils/firebaseService';
-import { isCheatDay, getDateString, getTodayProgress } from '../utils/dateUtils';
+import {
+  subscribeToHabits,
+  getTrackingDocForDate,
+  saveTracking,
+  setHabitDayStatus,
+  upsertPendingTask,
+  getPendingTasksUpToDate,
+  resolvePendingTask
+} from '../utils/firebaseService';
+import { isCheatDay, getDateAfterDays, getDateString, getNextWeekdayDate, getTodayProgress } from '../utils/dateUtils';
 
 const refreshQuotes = [
   'You do not rise to the level of your goals. You fall to the level of your systems.',
@@ -31,9 +39,14 @@ const getRefreshQuote = () => {
 function Home({ user, userData }) {
   const [habits, setHabits] = useState([]);
   const [todayTracking, setTodayTracking] = useState({});
+  const [todayStatus, setTodayStatus] = useState({});
+  const [pendingTasks, setPendingTasks] = useState([]);
   const [isCheat, setIsCheat] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState('');
   const [quote] = useState(() => getRefreshQuote());
+
+  const today = getDateString();
 
   useEffect(() => {
     let unsubscribe = null;
@@ -48,9 +61,13 @@ function Home({ user, userData }) {
         });
 
         // Load today's tracking
-        const today = getDateString();
-        const tracking = await getTrackingForDate(user.uid, today);
-        setTodayTracking(tracking);
+        const [trackingDoc, pending] = await Promise.all([
+          getTrackingDocForDate(user.uid, today),
+          getPendingTasksUpToDate(user.uid)
+        ]);
+        setTodayTracking(trackingDoc.habits || {});
+        setTodayStatus(trackingDoc.dayStatus || {});
+        setPendingTasks(pending);
 
         // Check cheat day
         const cheat = userData?.cheatDay ? isCheatDay(userData.cheatDay) : false;
@@ -70,12 +87,12 @@ function Home({ user, userData }) {
 
   const toggleHabit = async (habitId) => {
     if (isCheat) return;
-
-    const today = getDateString();
     const newValue = !todayTracking[habitId];
+    const previousStatus = todayStatus[habitId] || 'pending';
 
     // Optimistic update
     setTodayTracking(prev => ({ ...prev, [habitId]: newValue }));
+    setTodayStatus((prev) => ({ ...prev, [habitId]: newValue ? 'completed' : 'pending' }));
 
     try {
       await saveTracking(user.uid, today, habitId, newValue);
@@ -85,11 +102,68 @@ function Home({ user, userData }) {
       alert(`Failed to update habit${code}. Check Firestore rules and try again.`);
       // Revert on error
       setTodayTracking(prev => ({ ...prev, [habitId]: !newValue }));
+      setTodayStatus((prev) => ({ ...prev, [habitId]: previousStatus }));
+    }
+  };
+
+  const skipHabitForToday = async (habit) => {
+    const loadingKey = `skip-${habit.id}`;
+    setActionLoading(loadingKey);
+    setTodayTracking((prev) => ({ ...prev, [habit.id]: false }));
+    setTodayStatus((prev) => ({ ...prev, [habit.id]: 'skipped' }));
+
+    try {
+      await setHabitDayStatus(user.uid, today, habit.id, 'skipped');
+    } catch (err) {
+      console.error('Skip failed:', err);
+      alert('Failed to skip this habit for today.');
+    } finally {
+      setActionLoading('');
+    }
+  };
+
+  const moveHabit = async (habit, targetDate) => {
+    const loadingKey = `move-${habit.id}`;
+    setActionLoading(loadingKey);
+    setTodayTracking((prev) => ({ ...prev, [habit.id]: false }));
+    setTodayStatus((prev) => ({ ...prev, [habit.id]: 'rescheduled' }));
+
+    try {
+      await Promise.all([
+        setHabitDayStatus(user.uid, today, habit.id, 'rescheduled'),
+        upsertPendingTask(user.uid, today, {
+          habitId: habit.id,
+          habitName: habit.name,
+          dueDate: targetDate
+        })
+      ]);
+      const refreshed = await getPendingTasksUpToDate(user.uid);
+      setPendingTasks(refreshed);
+    } catch (err) {
+      console.error('Reschedule failed:', err);
+      alert('Failed to reschedule this habit.');
+    } finally {
+      setActionLoading('');
+    }
+  };
+
+  const resolveTask = async (task, nextStatus) => {
+    const loadingKey = `pending-${task.id}-${nextStatus}`;
+    setActionLoading(loadingKey);
+    try {
+      await resolvePendingTask(user.uid, task.sourceDate, task.id, nextStatus);
+      setPendingTasks((prev) => prev.filter((item) => item.id !== task.id));
+    } catch (err) {
+      console.error('Pending task update failed:', err);
+      alert('Failed to update pending task.');
+    } finally {
+      setActionLoading('');
     }
   };
 
   const progress = habits.length > 0 ? getTodayProgress(habits, todayTracking) : 0;
   const completedCount = habits.filter(habit => todayTracking[habit.id]).length;
+  const pendingCount = pendingTasks.length;
   const greeting = getGreetingByTime(userData?.name || user?.displayName);
 
   if (loading) {
@@ -138,7 +212,7 @@ function Home({ user, userData }) {
           <div className="progress-summary">
             <div className="progress-info">
               <h2>{completedCount} of {habits.length} completed</h2>
-              <p>{habits.length - completedCount} remaining</p>
+              <p>{habits.length - completedCount} remaining • {pendingCount} pending carry-overs</p>
             </div>
             <div className="progress-circle">
               <svg viewBox="0 0 100 100">
@@ -156,6 +230,55 @@ function Home({ user, userData }) {
                 />
                 <text x="50" y="50" className="progress-text">{Math.round(progress)}%</text>
               </svg>
+            </div>
+          </div>
+        )}
+
+        {pendingTasks.length > 0 && (
+          <div className="chart-container" style={{ marginBottom: '1rem' }}>
+            <h3 style={{ marginBottom: '0.75rem' }}>Pending Work ({pendingTasks.length})</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {pendingTasks.map((task) => (
+                <div
+                  key={task.id}
+                  style={{
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '10px',
+                    padding: '0.75rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: '0.75rem',
+                    flexWrap: 'wrap'
+                  }}
+                >
+                  <div>
+                    <strong>{task.habitName}</strong>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                      From {task.sourceDate} {'->'} Due {task.dueDate}
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => resolveTask(task, 'done')}
+                      disabled={actionLoading === `pending-${task.id}-done`}
+                      style={{ padding: '0.45rem 0.75rem' }}
+                    >
+                      Done
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => resolveTask(task, 'skipped')}
+                      disabled={actionLoading === `pending-${task.id}-skipped`}
+                      style={{ padding: '0.45rem 0.75rem' }}
+                    >
+                      Skip
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -182,7 +305,6 @@ function Home({ user, userData }) {
                 <div
                   key={habit.id}
                   className={`habit-item ${todayTracking[habit.id] ? 'completed' : ''}`}
-                  onClick={() => toggleHabit(habit.id)}
                 >
                   <div className="habit-checkbox">
                     {todayTracking[habit.id] && <span className="checkmark">✓</span>}
@@ -191,8 +313,50 @@ function Home({ user, userData }) {
                     <div className="habit-icon">{habit.icon}</div>
                     <div className="habit-details">
                       <h3>{habit.name}</h3>
-                      <span className="habit-category">{habit.category}</span>
+                      <span className="habit-category">
+                        {habit.category}
+                        {todayStatus[habit.id] === 'skipped' ? ' • Skipped today' : ''}
+                        {todayStatus[habit.id] === 'rescheduled' ? ' • Moved to pending' : ''}
+                      </span>
                     </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginLeft: 'auto' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => toggleHabit(habit.id)}
+                      disabled={isCheat}
+                      style={{ padding: '0.45rem 0.75rem' }}
+                    >
+                      {todayTracking[habit.id] ? 'Undo' : 'Done'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => skipHabitForToday(habit)}
+                      disabled={actionLoading === `skip-${habit.id}`}
+                      style={{ padding: '0.45rem 0.75rem' }}
+                    >
+                      Skip Today
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => moveHabit(habit, getDateAfterDays(1))}
+                      disabled={actionLoading === `move-${habit.id}`}
+                      style={{ padding: '0.45rem 0.75rem' }}
+                    >
+                      Tomorrow
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => moveHabit(habit, getNextWeekdayDate(userData?.cheatDay || 'sunday'))}
+                      disabled={actionLoading === `move-${habit.id}`}
+                      style={{ padding: '0.45rem 0.75rem' }}
+                    >
+                      Cheat Day
+                    </button>
                   </div>
                 </div>
               ))

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { clearAIChatHistory, createHabit, deleteHabit, getAIChatHistory, getUserHabits, getTrackingForDate, saveAIChatMessage } from '../utils/firebaseService';
+import { clearAIChatHistory, createHabit, deleteHabit, getAIChatHistory, getPendingTasksUpToDate, getUserHabits, getTrackingForDate, saveAIChatMessage } from '../utils/firebaseService';
 import { getDateString } from '../utils/dateUtils';
 
 const AI_API_BASE_URL = String(import.meta.env.VITE_AI_API_BASE_URL || '').trim();
@@ -21,6 +21,7 @@ function AIChat({ user, userData }) {
   const [messages, setMessages] = useState([defaultAssistantMessage]);
   const [activeHabits, setActiveHabits] = useState([]);
   const [completedCount, setCompletedCount] = useState(0);
+  const [pendingCount, setPendingCount] = useState(0);
 
   const getLocalHistoryKey = (uid) => `habytarc_ai_chat_history_${uid}`;
   const getChatResetKey = (uid) => `habytarc_ai_chat_reset_at_${uid}`;
@@ -80,10 +81,11 @@ function AIChat({ user, userData }) {
 
   useEffect(() => {
     const loadContext = async () => {
-      const [historyResult, habitsResult, trackingResult] = await Promise.allSettled([
+      const [historyResult, habitsResult, trackingResult, pendingResult] = await Promise.allSettled([
         getAIChatHistory(user.uid),
         getUserHabits(user.uid),
-        getTrackingForDate(user.uid, getDateString())
+        getTrackingForDate(user.uid, getDateString()),
+        getPendingTasksUpToDate(user.uid)
       ]);
 
       if (historyResult.status === 'fulfilled') {
@@ -126,6 +128,13 @@ function AIChat({ user, userData }) {
         setActiveHabits([]);
         setCompletedCount(0);
       }
+
+      if (pendingResult.status === 'fulfilled') {
+        setPendingCount(Array.isArray(pendingResult.value) ? pendingResult.value.length : 0);
+      } else {
+        console.warn('AI pending load failed:', pendingResult.reason);
+        setPendingCount(0);
+      }
     };
 
     loadContext();
@@ -135,9 +144,10 @@ function AIChat({ user, userData }) {
     () => ({
       activeHabits,
       completedCount,
+      pendingCount,
       name: userData?.name || user?.displayName || 'User'
     }),
-    [activeHabits, completedCount, userData?.name, user?.displayName]
+    [activeHabits, completedCount, pendingCount, userData?.name, user?.displayName]
   );
 
   const sendMessage = async (e) => {
@@ -332,7 +342,7 @@ function AIChat({ user, userData }) {
 
         <div className="chart-container" style={{ marginBottom: '1rem' }}>
           <p style={{ color: 'var(--text-secondary)' }}>
-            Context: {activeHabits.length} active habits, {completedCount} completed today.
+            Context: {activeHabits.length} active habits, {completedCount} completed today, {pendingCount} pending.
           </p>
         </div>
         

@@ -7,6 +7,14 @@ export const getDateString = (date = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
+export const addDays = (date, days) => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + Number(days || 0));
+  return next;
+};
+
+export const getDateAfterDays = (days, fromDate = new Date()) => getDateString(addDays(fromDate, days));
+
 export const isCheatDay = (cheatDay) => {
   const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const today = new Date().getDay();
@@ -53,6 +61,20 @@ export const isCheatDayForDate = (date, cheatDay) => {
   const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const dayIndex = date.getDay();
   return days[dayIndex] === cheatDay.toLowerCase();
+};
+
+export const getNextWeekdayDate = (weekdayName, fromDate = new Date(), includeToday = false) => {
+  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const normalized = String(weekdayName || 'sunday').toLowerCase();
+  const targetIndex = days.indexOf(normalized);
+  if (targetIndex < 0) return getDateString(fromDate);
+
+  const start = new Date(fromDate);
+  const startIndex = start.getDay();
+  let delta = (targetIndex - startIndex + 7) % 7;
+  if (delta === 0 && !includeToday) delta = 7;
+
+  return getDateString(addDays(start, delta));
 };
 
 export const getCompletionPercentage = (habitId, days = 30) => {
