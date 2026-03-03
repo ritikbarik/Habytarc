@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './config/firebase';
-import { getUserProfile } from './utils/firebaseService';
+import { createUserProfile, getUserProfile } from './utils/firebaseService';
 import './styles/App.css';
 
 import Login from './pages/Login';
@@ -22,7 +22,7 @@ function App() {
   const [theme, setTheme] = useState(() => {
     const savedTheme = localStorage.getItem('habytarc_theme');
     if (savedTheme === 'light' || savedTheme === 'dark') return savedTheme;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    return 'light';
   });
 
   useEffect(() => {
@@ -32,10 +32,28 @@ function App() {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      setLoading(true);
       if (firebaseUser) {
         setUser(firebaseUser);
-        const profile = await getUserProfile(firebaseUser.uid);
-        setUserData(profile);
+        try {
+          let profile = await getUserProfile(firebaseUser.uid);
+
+          // Prevent auth/profile race: ensure every signed-in user has a profile.
+          if (!profile) {
+            await createUserProfile(firebaseUser.uid, {
+              name: firebaseUser.displayName || 'User',
+              email: firebaseUser.email || '',
+              picture: firebaseUser.photoURL || '',
+              needsCareerSelection: true
+            });
+            profile = await getUserProfile(firebaseUser.uid);
+          }
+
+          setUserData(profile);
+        } catch (error) {
+          console.error('Failed to load user profile:', error);
+          setUserData(null);
+        }
       } else {
         setUser(null);
         setUserData(null);
