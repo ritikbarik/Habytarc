@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { Link, NavLink } from 'react-router-dom';
 
 function Navigation({ theme, onToggleTheme }) {
   const [logoFailed, setLogoFailed] = useState(false);
@@ -9,7 +9,7 @@ function Navigation({ theme, onToggleTheme }) {
     <>
       <nav className="navigation">
         <div className="nav-container">
-          <div className="nav-logo">
+          <Link to="/" className="nav-logo">
             {!logoFailed ? (
               <img
                 src="/logo.png"
@@ -20,7 +20,7 @@ function Navigation({ theme, onToggleTheme }) {
             ) : (
               <span>HabytARC</span>
             )}
-          </div>
+          </Link>
 
           <button type="button" className="nav-credit nav-credit-btn" onClick={() => setShowAbout(true)}>
             Developed by Zavris

@@ -80,15 +80,17 @@ function AIChat({ user, userData }) {
 
   useEffect(() => {
     const loadContext = async () => {
-      try {
-        const [history, habits] = await Promise.all([
-          getAIChatHistory(user.uid),
-          getUserHabits(user.uid)
-        ]);
+      const [historyResult, habitsResult, trackingResult] = await Promise.allSettled([
+        getAIChatHistory(user.uid),
+        getUserHabits(user.uid),
+        getTrackingForDate(user.uid, getDateString())
+      ]);
+
+      if (historyResult.status === 'fulfilled') {
         const resetAt = getChatResetAt(user.uid);
         const filteredHistory = resetAt
-          ? history.filter((item) => Number(item?.createdAtMs || 0) >= resetAt)
-          : history;
+          ? historyResult.value.filter((item) => Number(item?.createdAtMs || 0) >= resetAt)
+          : historyResult.value;
 
         if (filteredHistory.length > 0) {
           const cloudHistory = filteredHistory.map((item) => ({ role: item.role, text: item.text, id: item.id }));
@@ -100,18 +102,29 @@ function AIChat({ user, userData }) {
           setMessages(fallback);
           persistLocalHistory(user.uid, fallback);
         }
-
-        const enabled = habits.filter((habit) => habit.enabled !== false);
-        setActiveHabits(enabled);
-
-        const todayTracking = await getTrackingForDate(user.uid, getDateString());
-        const completed = enabled.filter((habit) => todayTracking[habit.id]).length;
-        setCompletedCount(completed);
-      } catch (error) {
-        console.error('Error loading AI context:', error);
+      } else {
+        console.warn('AI history load failed:', historyResult.reason);
         const localHistory = loadLocalHistory(user.uid);
         const fallback = localHistory.length > 0 ? localHistory : [defaultAssistantMessage];
         setMessages(fallback);
+      }
+
+      if (habitsResult.status === 'fulfilled') {
+        const enabled = habitsResult.value.filter((habit) => habit.enabled !== false);
+        setActiveHabits(enabled);
+
+        if (trackingResult.status === 'fulfilled') {
+          const todayTracking = trackingResult.value || {};
+          const completed = enabled.filter((habit) => todayTracking[habit.id]).length;
+          setCompletedCount(completed);
+        } else {
+          console.warn('AI tracking load failed:', trackingResult.reason);
+          setCompletedCount(0);
+        }
+      } else {
+        console.warn('AI habits load failed:', habitsResult.reason);
+        setActiveHabits([]);
+        setCompletedCount(0);
       }
     };
 
