@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    match /users/{uid} {
+      allow read, create, update, delete: if isOwner(uid);
+
+      match /todos/{todoId} {
+        allow read, create, update, delete: if isOwner(uid);
+      }
+
+      match /ai_chat/{messageId} {
+        allow read, create, update, delete: if isOwner(uid);
+      }
+
+      match /feedback/{feedbackId} {
+        allow read, create, update, delete: if isOwner(uid);
+      }
+    }
+
+    match /habits/{habitId} {
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid;
+
+      allow read, delete: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+    }
+
+    match /tracking/{trackingId} {
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid;
+
+      allow read, delete: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+    }
+
+    match /feedback/{feedbackId} {
+      allow create: if isSignedIn();
+      allow read, update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

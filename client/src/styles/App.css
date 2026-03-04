@@ -246,6 +246,48 @@
   background: rgba(96, 165, 250, 0.15);
 }
 
+/* Career selection dark-mode readability */
+[data-theme='dark'] .career-selection-card,
+[data-theme='dark'] .career-selection-card h1,
+[data-theme='dark'] .career-step h2 {
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .career-header p,
+[data-theme='dark'] .career-step > p,
+[data-theme='dark'] .career-card p {
+  color: var(--text-secondary);
+}
+
+[data-theme='dark'] .career-card {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
+}
+
+[data-theme='dark'] .career-card h3 {
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .career-card.selected {
+  background: var(--bg-primary);
+  border-color: var(--primary);
+}
+
+[data-theme='dark'] .day-button {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
+}
+
+[data-theme='dark'] .day-button:hover {
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .day-button.selected {
+  color: #fff;
+}
+
 /* Dark mode form readability */
 .form-group input,
 .form-group select,
@@ -1453,4 +1495,130 @@
 
 [data-theme='dark'] .calendar-day.selected {
   background: rgba(96, 165, 250, 0.15);
+}
+
+/* Extra-small mobile refinement */
+@media (max-width: 480px) {
+  .navigation {
+    height: 58px;
+  }
+
+  .nav-container {
+    padding: 0 0.65rem;
+    gap: 0.35rem;
+  }
+
+  .nav-logo {
+    font-size: 1rem;
+    gap: 0.35rem;
+  }
+
+  .theme-toggle-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+  }
+
+  .nav-links {
+    padding: 0.5rem 0.55rem;
+    gap: 0.15rem;
+  }
+
+  .nav-links .nav-link {
+    font-size: 0.78rem;
+    padding: 0.42rem 0.5rem;
+  }
+
+  .page-container {
+    margin-top: 58px;
+    padding: 1rem 0.75rem 6rem;
+  }
+
+  .page-header {
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: flex-start;
+  }
+
+  .chart-container,
+  .selected-day-panel,
+  .calendar-container,
+  .auth-card,
+  .career-selection-card {
+    padding: 1rem;
+  }
+
+  .career-grid,
+  .auth-cards-grid,
+  .feedback-grid,
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cheat-day-selector {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .day-button {
+    padding: 0.6rem 0.45rem;
+    font-size: 0.8rem;
+  }
+
+  .habit-item,
+  .todo-snapshot-item,
+  .pending-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .habit-actions,
+  .pending-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .habit-actions .btn,
+  .pending-actions .btn,
+  .todo-snapshot-item .btn {
+    width: 100%;
+  }
+
+  .progress-summary {
+    padding: 1rem;
+    gap: 0.75rem;
+  }
+
+  .progress-info h2 {
+    font-size: 1rem;
+  }
+
+  .progress-info p {
+    font-size: 0.8rem;
+  }
+
+  .modal-content {
+    max-height: 88vh;
+    overflow-y: auto;
+    padding: 1rem;
+  }
+
+  .icon-picker {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .home-ai-fab {
+    width: 44px;
+    height: 44px;
+    right: 0.6rem;
+    bottom: 5.1rem;
+  }
+
+  .auth-landing-main {
+    padding: 2rem 0.75rem 1.5rem;
+  }
+
+  .auth-landing-title {
+    font-size: clamp(2rem, 10vw, 2.6rem);
+  }
 }
