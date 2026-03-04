@@ -1,18 +1,23 @@
 import React, { useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 
-function Navigation({ theme, onToggleTheme }) {
+function Navigation({ theme, onToggleTheme, basePath = '' }) {
   const [logoFailed, setLogoFailed] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const isDark = theme === 'dark';
   const themeIcon = isDark ? '☀' : '🌙';
   const themeAria = isDark ? 'Switch to light mode' : 'Switch to dark mode';
+  const resolvePath = (path) => {
+    if (!basePath) return path;
+    if (path === '/') return `${basePath}/home`;
+    return `${basePath}${path}`;
+  };
 
   return (
     <>
       <nav className="navigation">
         <div className="nav-container">
-          <Link to="/" className="nav-logo">
+          <Link to={resolvePath('/')} className="nav-logo">
             {!logoFailed ? (
               <img
                 src="/logo.png"
@@ -30,28 +35,28 @@ function Navigation({ theme, onToggleTheme }) {
           </button>
 
           <div className="nav-links">
-            <NavLink to="/" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <NavLink to={resolvePath('/')} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <span className="nav-text">Home</span>
             </NavLink>
-            <NavLink to="/calendar" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <NavLink to={resolvePath('/calendar')} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <span className="nav-text">Calendar</span>
             </NavLink>
-            <NavLink to="/stats" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <NavLink to={resolvePath('/stats')} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <span className="nav-text">Stats</span>
             </NavLink>
-            <NavLink to="/habits" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <NavLink to={resolvePath('/habits')} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <span className="nav-text">Habits</span>
             </NavLink>
-            <NavLink to="/todo" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <NavLink to={resolvePath('/todo')} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <span className="nav-text">To-Do</span>
             </NavLink>
-            <NavLink to="/chat" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <NavLink to={resolvePath('/chat')} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <span className="nav-text">AI Chat</span>
             </NavLink>
-            <NavLink to="/connect" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <NavLink to={resolvePath('/connect')} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <span className="nav-text">Connect</span>
             </NavLink>
-            <NavLink to="/profile" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <NavLink to={resolvePath('/profile')} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <span className="nav-text">Profile</span>
             </NavLink>
           </div>

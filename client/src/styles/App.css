@@ -926,6 +926,41 @@
   }
 }
 
+/* Peek mode should use the same bottom mobile navbar behavior as signed-in mode */
+@media (max-width: 768px) {
+  .peek-app .nav-links {
+    position: fixed !important;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto !important;
+    z-index: 1200;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center;
+    justify-content: flex-start;
+    overflow-x: auto;
+    gap: 0.2rem;
+    padding: 0.55rem 0.65rem;
+    border-top: 1px solid var(--border-color) !important;
+    border-left: 0 !important;
+    border-right: 0 !important;
+    border-bottom: 0 !important;
+    border-radius: 0 !important;
+    background: var(--bg-primary) !important;
+    box-shadow: var(--shadow-md) !important;
+    scrollbar-width: none;
+  }
+
+  .peek-app .nav-links::-webkit-scrollbar {
+    display: none;
+  }
+
+  .peek-app .page-container {
+    padding-bottom: 5.6rem !important;
+  }
+}
+
 .auth-layout {
   width: 100%;
   max-width: 1080px;
@@ -1263,13 +1298,26 @@
   cursor: pointer;
 }
 
+.auth-hero-peek {
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: transparent;
+  color: #e2e8f0;
+  border-radius: 12px;
+  padding: 0.72rem 1.15rem;
+  font-size: 0.96rem;
+  font-weight: 600;
+  font-family: var(--font-family);
+  cursor: pointer;
+}
+
 .auth-hero-note {
   color: #94a3b8;
   font-size: 0.84rem;
 }
 
 .auth-hero-cta:hover,
-.auth-get-started-btn:hover {
+.auth-get-started-btn:hover,
+.auth-hero-peek:hover {
   filter: brightness(1.08);
 }
 

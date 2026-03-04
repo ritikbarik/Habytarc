@@ -71,6 +71,9 @@ function Login() {
         </p>
 
         <div className="auth-hero-actions">
+          <button type="button" className="auth-hero-peek" onClick={() => navigate('/peek')} disabled={loading}>
+            Take a Peek
+          </button>
           <button type="button" className="auth-hero-cta" onClick={handleGoogleSignIn} disabled={loading}>
             {loading ? 'Connecting Google...' : 'Launch My Habit Arc'}
             <span aria-hidden="true">→</span>
