@@ -60,7 +60,44 @@ export const getStreak = (habitId) => {
 export const isCheatDayForDate = (date, cheatDay) => {
   const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const dayIndex = date.getDay();
-  return days[dayIndex] === cheatDay.toLowerCase();
+  const normalized = String(cheatDay || 'sunday').toLowerCase();
+  return days[dayIndex] === normalized;
+};
+
+export const isCheatDayForDateKey = (dateKey, cheatDay = 'sunday') => {
+  const date = new Date(`${dateKey}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return false;
+  return isCheatDayForDate(date, cheatDay);
+};
+
+export const getHabitStreak = (habitId, trackingHistory = {}, cheatDay = 'sunday', endDate = new Date()) => {
+  if (!habitId) return 0;
+
+  const cursor = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+  const maxDays = 3650;
+  let streak = 0;
+
+  for (let i = 0; i < maxDays; i++) {
+    if (!isCheatDayForDate(cursor, cheatDay)) {
+      const key = getDateString(cursor);
+      const dayTracking = trackingHistory[key] || {};
+      if (dayTracking[habitId]) {
+        streak += 1;
+      } else {
+        break;
+      }
+    }
+    cursor.setDate(cursor.getDate() - 1);
+  }
+
+  return streak;
+};
+
+export const getHabitStreakMap = (habits = [], trackingHistory = {}, cheatDay = 'sunday', endDate = new Date()) => {
+  return habits.reduce((acc, habit) => {
+    acc[habit.id] = getHabitStreak(habit.id, trackingHistory, cheatDay, endDate);
+    return acc;
+  }, {});
 };
 
 export const getNextWeekdayDate = (weekdayName, fromDate = new Date(), includeToday = false) => {

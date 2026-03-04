@@ -1,16 +1,38 @@
 import React, { useState, useEffect } from 'react';
-import { getUserHabits, subscribeToTracking, saveTracking } from '../utils/firebaseService';
-import { getDateString } from '../utils/dateUtils';
+import { getPendingTasksForDate, getUserHabits, subscribeToTracking, saveTracking } from '../utils/firebaseService';
+import { getDateString, isCheatDayForDate } from '../utils/dateUtils';
 
-function Calendar({ user }) {
+const previewHabits = [
+  { id: 'p1', name: 'Morning Walk', category: 'Health', icon: '🚶', enabled: true },
+  { id: 'p2', name: 'Deep Work Sprint', category: 'Work', icon: '💻', enabled: true },
+  { id: 'p3', name: 'Read 20 mins', category: 'Learning', icon: '📚', enabled: true }
+];
+
+function Calendar({ user, userData, isPreview = false }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
   const [habits, setHabits] = useState([]);
   const [tracking, setTracking] = useState({});
   const [selectedDayHabits, setSelectedDayHabits] = useState([]);
+  const [selectedIsCheat, setSelectedIsCheat] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (isPreview) {
+      const today = new Date();
+      const d1 = getDateString(today);
+      const d2 = getDateString(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1));
+      const d3 = getDateString(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 2));
+      setHabits(previewHabits);
+      setTracking({
+        [d1]: { p1: true, p2: true, p3: false },
+        [d2]: { p1: true, p2: false, p3: true },
+        [d3]: { p1: true, p2: true, p3: true }
+      });
+      setLoading(false);
+      return () => {};
+    }
+
     let unsubscribeTracking = null;
 
     const loadData = async () => {
@@ -36,7 +58,7 @@ function Calendar({ user }) {
     return () => {
       if (unsubscribeTracking) unsubscribeTracking();
     };
-  }, [user.uid]);
+  }, [isPreview, user?.uid]);
 
   const getDaysInMonth = (date) => {
     const year = date.getFullYear();
@@ -60,22 +82,76 @@ function Calendar({ user }) {
     setSelectedDate(null);
   };
 
-  const handleDateClick = (day) => {
+  const handleDateClick = async (day) => {
     const clickedDate = new Date(year, month, day);
     setSelectedDate(clickedDate);
     
     const dateStr = getDateString(clickedDate);
     const dayTracking = tracking[dateStr] || {};
-    
-    const habitsWithStatus = habits.map(h => ({
-      ...h,
-      completed: dayTracking[h.id] || false
+    const cheatDay = String(userData?.cheatDay || 'sunday').toLowerCase();
+    const isCheat = isCheatDayForDate(clickedDate, cheatDay);
+    setSelectedIsCheat(isCheat);
+
+    if (isCheat) {
+      if (isPreview) {
+        const movedPreview = [
+          {
+            id: 'preview-moved-1',
+            habitId: 'p3',
+            habitName: 'Read 20 mins',
+            dueDate: dateStr,
+            status: 'pending'
+          }
+        ];
+        const movedHabits = movedPreview
+          .filter((task) => task.dueDate === dateStr)
+          .map((task) => {
+            const original = habits.find((habit) => habit.id === task.habitId);
+            return {
+              id: task.habitId,
+              name: task.habitName || original?.name || 'Moved Habit',
+              category: original?.category || 'Moved',
+              icon: original?.icon || '⏩',
+              completed: Boolean(dayTracking[task.habitId])
+            };
+          });
+        setSelectedDayHabits(movedHabits);
+        return;
+      }
+
+      try {
+        const movedTasks = await getPendingTasksForDate(user.uid, dateStr);
+        const movedHabits = movedTasks.map((task) => {
+          const original = habits.find((habit) => habit.id === task.habitId);
+          return {
+            id: task.habitId,
+            name: task.habitName || original?.name || 'Moved Habit',
+            category: original?.category || 'Moved',
+            icon: original?.icon || '⏩',
+            completed: Boolean(dayTracking[task.habitId])
+          };
+        });
+        setSelectedDayHabits(movedHabits);
+      } catch (error) {
+        console.error('Failed to load moved habits for cheat day:', error);
+        setSelectedDayHabits([]);
+      }
+      return;
+    }
+
+    const habitsWithStatus = habits.map((habit) => ({
+      ...habit,
+      completed: dayTracking[habit.id] || false
     }));
-    
+
     setSelectedDayHabits(habitsWithStatus);
   };
 
   const toggleHabitForDate = async (habitId) => {
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
     if (!selectedDate) return;
 
     const dateStr = getDateString(selectedDate);
@@ -222,7 +298,9 @@ function Calendar({ user }) {
             
             {selectedDayHabits.length === 0 ? (
               <p style={{ color: 'var(--text-secondary)', marginTop: '1rem' }}>
-                No habits for this date
+                {selectedIsCheat
+                  ? 'Cheat day: no regular habits. Only habits moved to this day are shown.'
+                  : 'No habits for this date'}
               </p>
             ) : (
               <div className="habits-list" style={{ marginTop: '1rem' }}>

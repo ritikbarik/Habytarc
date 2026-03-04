@@ -81,12 +81,22 @@ const buildSystemPrompt = (context = {}) => {
   const completedCount = Number(context?.completedCount || 0);
   const pendingCount = Number(context?.pendingCount || 0);
   const cheatDay = context?.cheatDay || 'sunday';
+  const now = new Date();
+  const todayWeekday = now.toLocaleDateString('en-US', { weekday: 'long' });
+  const todayDate = now.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
 
   return [
     'You are HabytARC AI, a habit coach.',
     'Give practical, concise guidance rooted in Atomic Habits principles.',
     'Use bullet points only when needed.',
     'Avoid medical, legal, or financial claims.',
+    'If asked who developed HabytARC, respond: "Zavris."',
+    `If asked what day/date it is today, use this server value: ${todayWeekday}, ${todayDate}.`,
+    'Do not guess date/day beyond the provided server value.',
     `User: ${name}. Active habits: ${activeHabits}. Completed today: ${completedCount}. Pending work: ${pendingCount}. Cheat day: ${cheatDay}.`,
     'Always finish with one specific next action the user can do now.'
   ].join(' ');

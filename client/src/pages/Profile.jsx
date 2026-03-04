@@ -4,7 +4,7 @@ import { signOutUser } from '../config/firebase';
 import { getUserHabits, getTrackingHistory, updateUserProfile } from '../utils/firebaseService';
 import { getCareerInfo } from '../utils/careerHabits';
 
-function Profile({ user, userData, onProfileUpdated }) {
+function Profile({ user, userData, theme, themeOptions = [], onThemeChange, onProfileUpdated, isPreview = false }) {
   const [stats, setStats] = useState({ totalHabits: 0, totalDays: 0 });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -13,22 +13,29 @@ function Profile({ user, userData, onProfileUpdated }) {
     name: '',
     picture: '',
     career: 'general',
-    cheatDay: 'sunday'
+    cheatDay: 'sunday',
+    theme: 'dark'
   });
   const navigate = useNavigate();
 
   useEffect(() => {
+    if (isPreview) {
+      setStats({ totalHabits: 4, totalDays: 28 });
+      setLoading(false);
+      return;
+    }
     loadStats();
-  }, [user.uid]);
+  }, [isPreview, user?.uid]);
 
   useEffect(() => {
     setProfileForm({
       name: userData?.name || user.displayName || '',
       picture: userData?.picture || '',
       career: userData?.career || 'general',
-      cheatDay: userData?.cheatDay || 'sunday'
+      cheatDay: userData?.cheatDay || 'sunday',
+      theme: userData?.theme || theme || 'dark'
     });
-  }, [userData, user.displayName, user.email]);
+  }, [userData, user.displayName, user.email, theme]);
 
   const loadStats = async () => {
     try {
@@ -49,6 +56,10 @@ function Profile({ user, userData, onProfileUpdated }) {
   };
 
   const handleLogout = async () => {
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
     if (!window.confirm('Are you sure you want to log out?')) return;
 
     try {
@@ -124,6 +135,10 @@ function Profile({ user, userData, onProfileUpdated }) {
 
   const handleSaveProfile = async (e) => {
     e.preventDefault();
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
     setSaving(true);
 
     try {
@@ -131,8 +146,13 @@ function Profile({ user, userData, onProfileUpdated }) {
         name: profileForm.name.trim(),
         picture: profileForm.picture.trim(),
         career: profileForm.career,
-        cheatDay: profileForm.cheatDay
+        cheatDay: profileForm.cheatDay,
+        theme: profileForm.theme
       });
+
+      if (onThemeChange) {
+        onThemeChange(profileForm.theme);
+      }
 
       if (onProfileUpdated) {
         await onProfileUpdated();
@@ -182,10 +202,16 @@ function Profile({ user, userData, onProfileUpdated }) {
               {showEditForm ? 'Hide Edit' : 'Edit Profile'}
             </button>
             <button className="btn btn-secondary" onClick={handleLogout}>
-              Log Out
+              {isPreview ? 'Login to Continue' : 'Log Out'}
             </button>
           </div>
         </div>
+
+        {isPreview && (
+          <div className="chart-container" style={{ marginBottom: '1rem', borderColor: 'var(--primary)' }}>
+            <p style={{ color: 'var(--text-secondary)' }}>Preview mode is read-only. Login to save profile or apply settings.</p>
+          </div>
+        )}
 
         <div className="profile-card">
           {profileForm.picture ? (
@@ -289,6 +315,21 @@ function Profile({ user, userData, onProfileUpdated }) {
                   <option value="thursday">Thursday</option>
                   <option value="friday">Friday</option>
                   <option value="saturday">Saturday</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label>App Theme</label>
+                <select
+                  value={profileForm.theme}
+                  onChange={(e) => handleProfileChange('theme', e.target.value)}
+                  disabled={saving}
+                >
+                  {themeOptions.map((item) => (
+                    <option key={item} value={item}>
+                      {item.charAt(0).toUpperCase() + item.slice(1)}
+                    </option>
+                  ))}
                 </select>
               </div>
 

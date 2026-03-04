@@ -1,11 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { subscribeToHabits, createHabit, updateHabit, deleteHabit } from '../utils/firebaseService';
+import React, { useState, useEffect, useMemo } from 'react';
+import { subscribeToHabits, createHabit, updateHabit, deleteHabit, getTrackingHistory, getUserProfile } from '../utils/firebaseService';
+import { getHabitStreakMap } from '../utils/dateUtils';
 
-function Habits({ user }) {
+const previewHabits = [
+  { id: 'p1', name: 'Morning Walk', category: 'Health', icon: '🚶', enabled: true },
+  { id: 'p2', name: 'Deep Work Sprint', category: 'Work', icon: '💻', enabled: true },
+  { id: 'p3', name: 'Read 20 mins', category: 'Learning', icon: '📚', enabled: true }
+];
+
+function Habits({ user, isPreview = false }) {
   const [habits, setHabits] = useState([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [trackingHistory, setTrackingHistory] = useState({});
+  const [cheatDay, setCheatDay] = useState('sunday');
   const [newHabit, setNewHabit] = useState({
     name: '',
     category: 'Work',
@@ -16,16 +25,53 @@ function Habits({ user }) {
   const icons = ['⭐', '💼', '💪', '📚', '🎯', '🏃', '🧘', '💻', '🎨', '🍎', '☕', '🚀', '🔥', '⚡', '🌟'];
 
   useEffect(() => {
+    if (isPreview) {
+      setHabits(previewHabits);
+      setTrackingHistory({
+        [new Date().toISOString().slice(0, 10)]: { p1: true, p2: true, p3: false }
+      });
+      setCheatDay('sunday');
+      setLoading(false);
+      return () => {};
+    }
+
     const unsubscribe = subscribeToHabits(user.uid, (fetchedHabits) => {
       setHabits(fetchedHabits);
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [user.uid]);
+  }, [isPreview, user?.uid]);
+
+  useEffect(() => {
+    if (isPreview) return;
+    const loadMeta = async () => {
+      try {
+        const [history, profile] = await Promise.all([
+          getTrackingHistory(user.uid),
+          getUserProfile(user.uid)
+        ]);
+        setTrackingHistory(history);
+        setCheatDay(profile?.cheatDay || 'sunday');
+      } catch (error) {
+        console.error('Failed to load streak metadata:', error);
+      }
+    };
+
+    loadMeta();
+  }, [isPreview, user?.uid]);
+
+  const streakMap = useMemo(
+    () => getHabitStreakMap(habits, trackingHistory, cheatDay),
+    [habits, trackingHistory, cheatDay]
+  );
 
   const handleAddHabit = async (e) => {
     e.preventDefault();
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
     setSubmitting(true);
 
     try {
@@ -41,6 +87,10 @@ function Habits({ user }) {
   };
 
   const toggleHabit = async (habitId, currentState) => {
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
     // Optimistic update
     setHabits(habits.map(h => 
       h.id === habitId ? { ...h, enabled: !currentState } : h
@@ -58,6 +108,10 @@ function Habits({ user }) {
   };
 
   const handleDeleteHabit = async (habitId) => {
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
     if (!window.confirm('Delete this habit? Tracking data will be kept.')) return;
 
     // Optimistic delete
@@ -95,7 +149,16 @@ function Habits({ user }) {
             <h1>Manage Habits</h1>
             <p className="page-subtitle">Add or customize your habits</p>
           </div>
-          <button className="btn btn-primary" onClick={() => setShowAddForm(true)}>
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              if (isPreview) {
+                alert('Login to continue');
+                return;
+              }
+              setShowAddForm(true);
+            }}
+          >
             + Add Habit
           </button>
         </div>
@@ -194,7 +257,7 @@ function Habits({ user }) {
                   <div className="habit-icon">{habit.icon}</div>
                   <div className="habit-details">
                     <h3>{habit.name}</h3>
-                    <span className="habit-category">{habit.category}</span>
+                    <span className="habit-category">{habit.category} • Streak {streakMap[habit.id] || 0}d</span>
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>

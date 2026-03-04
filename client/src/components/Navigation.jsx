@@ -4,6 +4,7 @@ import { Link, NavLink } from 'react-router-dom';
 function Navigation({ theme, onToggleTheme }) {
   const [logoFailed, setLogoFailed] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const themeLabel = theme ? theme.charAt(0).toUpperCase() + theme.slice(1) : 'Theme';
 
   return (
     <>
@@ -39,16 +40,22 @@ function Navigation({ theme, onToggleTheme }) {
             <NavLink to="/habits" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <span className="nav-text">Habits</span>
             </NavLink>
+            <NavLink to="/todo" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <span className="nav-text">To-Do</span>
+            </NavLink>
             <NavLink to="/chat" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <span className="nav-text">AI Chat</span>
+            </NavLink>
+            <NavLink to="/connect" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <span className="nav-text">Connect</span>
             </NavLink>
             <NavLink to="/profile" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <span className="nav-text">Profile</span>
             </NavLink>
           </div>
 
-          <button type="button" className="theme-toggle-btn" onClick={onToggleTheme}>
-              <span className="nav-text">{theme === 'dark' ? 'Light' : 'Dark'}</span>
+          <button type="button" className="theme-toggle-btn" onClick={onToggleTheme} aria-label="Toggle theme">
+              <span className="nav-text">Theme: {themeLabel}</span>
           </button>
         </div>
       </nav>
@@ -63,12 +70,10 @@ function Navigation({ theme, onToggleTheme }) {
               </button>
             </div>
             <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-              Ritik Barik (Zavris) is the developer behind HabytARC, building practical products that make daily progress easy to maintain.
+            Zavris is the developer behind HabytARC, building practical products that make daily progress easy to maintain.
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <a className="about-contact-link" href="mailto:proffzavris@gmail.com">Email: proffzavris@gmail.com</a>
-              <a className="about-contact-link" href="https://www.linkedin.com/in/ritikbarik/" target="_blank" rel="noreferrer">LinkedIn: linkedin.com/in/ritikbarik</a>
-              <a className="about-contact-link" href="https://instagram.com/ritikkbarik" target="_blank" rel="noreferrer">Instagram: instagram.com/ritikkbarik</a>
+              <a className="about-contact-link" href="mailto:habytarc@gmail.com">Email: habytarc@gmail.com</a>
             </div>
           </div>
         </div>

@@ -7,7 +7,7 @@ const CHAT_ENDPOINT = AI_API_BASE_URL
   ? `${AI_API_BASE_URL.replace(/\/+$/, '')}/api/chat`
   : '/api/chat';
 
-function AIChat({ user, userData }) {
+function AIChat({ user, userData, isPreview = false }) {
   const defaultAssistantMessage = {
     role: 'assistant',
     text: 'I am HabytARC AI. Ask me anything about consistency, routines, or habit design.'
@@ -80,6 +80,23 @@ function AIChat({ user, userData }) {
   };
 
   useEffect(() => {
+    if (isPreview) {
+      setMessages([
+        defaultAssistantMessage,
+        { role: 'assistant', text: 'Preview mode: I can show how chat looks, but actions are locked until login.' },
+        { role: 'user', text: 'Can you help me recover my streak?' },
+        { role: 'assistant', text: 'Yes. In full mode, I suggest one tiny restart action and track it with your daily progress.' }
+      ]);
+      setActiveHabits([
+        { id: 'p1', name: 'Morning Walk' },
+        { id: 'p2', name: 'Deep Work Sprint' },
+        { id: 'p3', name: 'Read 20 mins' }
+      ]);
+      setCompletedCount(2);
+      setPendingCount(1);
+      return;
+    }
+
     const loadContext = async () => {
       const [historyResult, habitsResult, trackingResult, pendingResult] = await Promise.allSettled([
         getAIChatHistory(user.uid),
@@ -138,7 +155,7 @@ function AIChat({ user, userData }) {
     };
 
     loadContext();
-  }, [user.uid]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isPreview, user?.uid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const coachContext = useMemo(
     () => ({
@@ -152,6 +169,10 @@ function AIChat({ user, userData }) {
 
   const sendMessage = async (e) => {
     e.preventDefault();
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
     const text = input.trim();
     if (!text || sending) return;
 
@@ -277,6 +298,10 @@ function AIChat({ user, userData }) {
   };
 
   const startNewChat = async () => {
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
     if (sending || clearing) return;
     const shouldClear = window.confirm('Start a new chat? Previous messages will be hidden from now on.');
     if (!shouldClear) return;
@@ -299,6 +324,10 @@ function AIChat({ user, userData }) {
   };
 
   const toggleTemporaryMode = () => {
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
     if (sending || clearing) return;
     if (!temporaryMode) {
       setNormalModeSnapshot(messages);

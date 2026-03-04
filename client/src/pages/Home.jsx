@@ -1,15 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  completeTodoWithRecurrence,
   subscribeToHabits,
+  subscribeToTodos,
   getTrackingDocForDate,
+  getTrackingHistory,
   saveTracking,
+  saveHabitNote,
   setHabitDayStatus,
   upsertPendingTask,
   getPendingTasksUpToDate,
   resolvePendingTask
 } from '../utils/firebaseService';
-import { isCheatDay, getDateAfterDays, getDateString, getNextWeekdayDate, getTodayProgress } from '../utils/dateUtils';
+import { isCheatDay, getDateAfterDays, getDateString, getNextWeekdayDate, getTodayProgress, getHabitStreakMap } from '../utils/dateUtils';
 
 const refreshQuotes = [
   'You do not rise to the level of your goals. You fall to the level of your systems.',
@@ -36,20 +40,61 @@ const getRefreshQuote = () => {
   return refreshQuotes[index];
 };
 
-function Home({ user, userData }) {
+const previewHabits = [
+  { id: 'p1', name: 'Morning Walk', category: 'Health', icon: '🚶' },
+  { id: 'p2', name: 'Deep Work Sprint', category: 'Work', icon: '💻' },
+  { id: 'p3', name: 'Read 20 mins', category: 'Learning', icon: '📚' },
+  { id: 'p4', name: 'Journal', category: 'Lifestyle', icon: '📝' }
+];
+
+const previewTodos = [
+  { id: 'td1', text: 'Prepare task priority list', completed: false, createdAtMs: Date.now() - 10000 },
+  { id: 'td2', text: 'Review yesterday progress', completed: false, createdAtMs: Date.now() - 20000 }
+];
+
+function Home({ user, userData, isPreview = false }) {
   const [habits, setHabits] = useState([]);
+  const [todos, setTodos] = useState([]);
   const [todayTracking, setTodayTracking] = useState({});
   const [todayStatus, setTodayStatus] = useState({});
   const [pendingTasks, setPendingTasks] = useState([]);
+  const [trackingHistory, setTrackingHistory] = useState({});
   const [isCheat, setIsCheat] = useState(false);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState('');
   const [quote] = useState(() => getRefreshQuote());
+  const [todoDayKey, setTodoDayKey] = useState(() => getDateString());
 
   const today = getDateString();
 
   useEffect(() => {
+    const timer = setInterval(() => {
+      const next = getDateString();
+      setTodoDayKey((prev) => (prev === next ? prev : next));
+    }, 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (isPreview) {
+      const todayKey = getDateString();
+      setHabits(previewHabits);
+      setTodayTracking({ p1: true, p2: true, p3: false, p4: false });
+      setTodayStatus({ p1: 'completed', p2: 'completed', p3: 'pending', p4: 'pending' });
+      setTrackingHistory({
+        [todayKey]: { p1: true, p2: true, p3: false, p4: false }
+      });
+      setPendingTasks([
+        { id: 'pt-1', habitId: 'p3', habitName: 'Read 20 mins', sourceDate: todayKey, dueDate: getDateAfterDays(1), status: 'pending' }
+      ]);
+      setTodos(previewTodos);
+      setIsCheat(false);
+      setLoading(false);
+      return;
+    }
+
     let unsubscribe = null;
+    let unsubscribeTodos = null;
 
     const loadData = async () => {
       try {
@@ -59,6 +104,9 @@ function Home({ user, userData }) {
           setHabits(enabledHabits);
           setLoading(false);
         });
+        unsubscribeTodos = subscribeToTodos(user.uid, (fetchedTodos) => {
+          setTodos(fetchedTodos);
+        }, todoDayKey);
 
         // Load today's tracking
         const [trackingDoc, pending] = await Promise.all([
@@ -68,6 +116,8 @@ function Home({ user, userData }) {
         setTodayTracking(trackingDoc.habits || {});
         setTodayStatus(trackingDoc.dayStatus || {});
         setPendingTasks(pending);
+        const history = await getTrackingHistory(user.uid);
+        setTrackingHistory(history);
 
         // Check cheat day
         const cheat = userData?.cheatDay ? isCheatDay(userData.cheatDay) : false;
@@ -82,10 +132,51 @@ function Home({ user, userData }) {
 
     return () => {
       if (unsubscribe) unsubscribe();
+      if (unsubscribeTodos) unsubscribeTodos();
     };
-  }, [user.uid, userData?.cheatDay]);
+  }, [isPreview, user?.uid, userData?.cheatDay, todoDayKey]);
+
+  useEffect(() => {
+    if (isPreview) return;
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission === 'default' && habits.some((habit) => Boolean(habit.reminderTime))) {
+      Notification.requestPermission().catch(() => {});
+    }
+    if (Notification.permission !== 'granted') return;
+    if (!Array.isArray(habits) || habits.length === 0) return;
+
+    const timer = setInterval(() => {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const current = `${hh}:${mm}`;
+      const dayKey = getDateString(now);
+
+      habits.forEach((habit) => {
+        const reminderTime = String(habit.reminderTime || '');
+        if (!reminderTime || reminderTime !== current) return;
+        const stampKey = `habytarc_reminder_${user?.uid}_${habit.id}_${dayKey}`;
+        if (localStorage.getItem(stampKey)) return;
+        localStorage.setItem(stampKey, '1');
+        try {
+          new Notification('HabytARC Reminder', {
+            body: `Time for "${habit.name}"`,
+            tag: `habit_${habit.id}_${dayKey}`
+          });
+        } catch (error) {
+          console.error('Reminder notification failed:', error);
+        }
+      });
+    }, 60 * 1000);
+
+    return () => clearInterval(timer);
+  }, [habits, isPreview, user?.uid]);
 
   const toggleHabit = async (habitId) => {
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
     if (isCheat) return;
     const newValue = !todayTracking[habitId];
     const previousStatus = todayStatus[habitId] || 'pending';
@@ -96,6 +187,12 @@ function Home({ user, userData }) {
 
     try {
       await saveTracking(user.uid, today, habitId, newValue);
+      if (newValue) {
+        const note = window.prompt('Add a quick note for this habit (optional):', '');
+        if (note && note.trim()) {
+          await saveHabitNote(user.uid, today, habitId, note.trim());
+        }
+      }
     } catch (err) {
       console.error('Error saving:', err);
       const code = err?.code ? ` (${err.code})` : '';
@@ -107,6 +204,10 @@ function Home({ user, userData }) {
   };
 
   const skipHabitForToday = async (habit) => {
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
     const loadingKey = `skip-${habit.id}`;
     setActionLoading(loadingKey);
     setTodayTracking((prev) => ({ ...prev, [habit.id]: false }));
@@ -123,6 +224,10 @@ function Home({ user, userData }) {
   };
 
   const moveHabit = async (habit, targetDate) => {
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
     const loadingKey = `move-${habit.id}`;
     setActionLoading(loadingKey);
     setTodayTracking((prev) => ({ ...prev, [habit.id]: false }));
@@ -148,6 +253,10 @@ function Home({ user, userData }) {
   };
 
   const resolveTask = async (task, nextStatus) => {
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
     const loadingKey = `pending-${task.id}-${nextStatus}`;
     setActionLoading(loadingKey);
     try {
@@ -161,10 +270,89 @@ function Home({ user, userData }) {
     }
   };
 
+  const completeTodo = async (todoItem) => {
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
+    try {
+      await completeTodoWithRecurrence(user.uid, todoItem.id);
+    } catch (error) {
+      console.error('Failed to complete todo:', error);
+      alert('Failed to complete to-do.');
+    }
+  };
+
+  const trackingWithToday = useMemo(() => ({
+    ...trackingHistory,
+    [today]: {
+      ...(trackingHistory[today] || {}),
+      ...todayTracking
+    }
+  }), [trackingHistory, todayTracking, today]);
+
+  const streakMap = useMemo(
+    () => getHabitStreakMap(habits, trackingWithToday, userData?.cheatDay || 'sunday'),
+    [habits, trackingWithToday, userData?.cheatDay]
+  );
+
+  const bestStreak = useMemo(
+    () => Object.values(streakMap).reduce((max, value) => Math.max(max, value), 0),
+    [streakMap]
+  );
+
+  const visibleHabits = useMemo(() => {
+    return habits.filter((habit) => {
+      const status = String(todayStatus[habit.id] || '').toLowerCase();
+      if (status === 'completed' || status === 'skipped' || status === 'rescheduled') return false;
+      if (todayTracking[habit.id]) return false;
+      return true;
+    });
+  }, [habits, todayStatus, todayTracking]);
+
   const progress = habits.length > 0 ? getTodayProgress(habits, todayTracking) : 0;
   const completedCount = habits.filter(habit => todayTracking[habit.id]).length;
   const pendingCount = pendingTasks.length;
+  const openTodos = todos.filter((item) => !item.completed).length;
+  const openTodoItems = useMemo(() => todos.filter((item) => !item.completed), [todos]);
   const greeting = getGreetingByTime(userData?.name || user?.displayName);
+  const prioritizeTodo = !isCheat && visibleHabits.length === 0 && openTodoItems.length > 0;
+
+  const todoSection = (
+    <div className="chart-container home-section">
+      <div className="home-section-header home-section-header-wrap">
+        <h3>To-Do Snapshot ({openTodos} open)</h3>
+        <Link to="/todo" className="btn btn-secondary home-link-btn">
+          Open To-Do
+        </Link>
+      </div>
+      {openTodoItems.length === 0 ? (
+        <p style={{ color: 'var(--text-secondary)' }}>No to-do tasks yet.</p>
+      ) : (
+        <div className="home-list-stack">
+          {openTodoItems.slice(0, 5).map((todoItem) => (
+            <div
+              key={todoItem.id}
+              className="todo-snapshot-item"
+            >
+              <span>{todoItem.text}</span>
+              <span style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
+                {String(todoItem.priority || 'medium').toUpperCase()}
+                {todoItem.dueDate ? ` • Due ${todoItem.dueDate}` : ''}
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => completeTodo(todoItem)}
+              >
+                Done
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 
   if (loading) {
     return (
@@ -184,7 +372,7 @@ function Home({ user, userData }) {
       <div className="page-content">
         <div className="page-header">
           <div>
-            <h1>Today's Habits</h1>
+            <h1>{greeting} 👋</h1>
             <p className="page-subtitle">
               {isCheat ? (
                 <span className="cheat-day-badge">🎉 Cheat Day - Rest & Recharge</span>
@@ -195,15 +383,8 @@ function Home({ user, userData }) {
           </div>
         </div>
 
-        <div style={{
-          marginBottom: '1rem',
-          padding: '1rem 1.25rem',
-          background: 'var(--bg-primary)',
-          border: '1px solid var(--border-color)',
-          borderRadius: 'var(--radius-lg)'
-        }}>
-          <h2 style={{ fontSize: '1.1rem', marginBottom: '0.35rem' }}>{greeting} 👋</h2>
-          <p style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+        <div className="home-quote">
+          <p>
             "{quote}"
           </p>
         </div>
@@ -212,7 +393,7 @@ function Home({ user, userData }) {
           <div className="progress-summary">
             <div className="progress-info">
               <h2>{completedCount} of {habits.length} completed</h2>
-              <p>{habits.length - completedCount} remaining • {pendingCount} pending carry-overs</p>
+              <p>{visibleHabits.length} remaining • {pendingCount} pending carry-overs • {openTodos} open to-do(s) • Best streak: {bestStreak} day{bestStreak === 1 ? '' : 's'}</p>
             </div>
             <div className="progress-circle">
               <svg viewBox="0 0 100 100">
@@ -234,54 +415,7 @@ function Home({ user, userData }) {
           </div>
         )}
 
-        {pendingTasks.length > 0 && (
-          <div className="chart-container" style={{ marginBottom: '1rem' }}>
-            <h3 style={{ marginBottom: '0.75rem' }}>Pending Work ({pendingTasks.length})</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {pendingTasks.map((task) => (
-                <div
-                  key={task.id}
-                  style={{
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '10px',
-                    padding: '0.75rem',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    gap: '0.75rem',
-                    flexWrap: 'wrap'
-                  }}
-                >
-                  <div>
-                    <strong>{task.habitName}</strong>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                      From {task.sourceDate} {'->'} Due {task.dueDate}
-                    </p>
-                  </div>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={() => resolveTask(task, 'done')}
-                      disabled={actionLoading === `pending-${task.id}-done`}
-                      style={{ padding: '0.45rem 0.75rem' }}
-                    >
-                      Done
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => resolveTask(task, 'skipped')}
-                      disabled={actionLoading === `pending-${task.id}-skipped`}
-                      style={{ padding: '0.45rem 0.75rem' }}
-                    >
-                      Skip
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {prioritizeTodo && todoSection}
 
         {isCheat ? (
           <div className="cheat-day-message">
@@ -290,77 +424,128 @@ function Home({ user, userData }) {
             <p>Your streaks are safe. Relax!</p>
           </div>
         ) : (
-          <div className="habits-list">
-            {habits.length === 0 ? (
-              <div className="empty-state">
-                <div className="empty-icon">📋</div>
-                <h3>No habits yet</h3>
-                <p>Add habits from the Habits page to get started</p>
-                <a href="/habits" className="btn btn-primary" style={{ marginTop: '1rem', textDecoration: 'none' }}>
-                  Add Your First Habit
-                </a>
-              </div>
-            ) : (
-              habits.map((habit) => (
-                <div
-                  key={habit.id}
-                  className={`habit-item ${todayTracking[habit.id] ? 'completed' : ''}`}
-                >
-                  <div className="habit-checkbox">
-                    {todayTracking[habit.id] && <span className="checkmark">✓</span>}
-                  </div>
-                  <div className="habit-content">
-                    <div className="habit-icon">{habit.icon}</div>
-                    <div className="habit-details">
-                      <h3>{habit.name}</h3>
-                      <span className="habit-category">
-                        {habit.category}
-                        {todayStatus[habit.id] === 'skipped' ? ' • Skipped today' : ''}
-                        {todayStatus[habit.id] === 'rescheduled' ? ' • Moved to pending' : ''}
-                      </span>
+          <div className="chart-container home-section">
+            <div className="home-section-header">
+              <h3>Habits for Today</h3>
+            </div>
+            <div className="habits-list">
+              {habits.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-icon">📋</div>
+                  <h3>No habits yet</h3>
+                  <p>Add habits from the Habits page to get started</p>
+                  <a href="/habits" className="btn btn-primary" style={{ marginTop: '1rem', textDecoration: 'none' }}>
+                    Add Your First Habit
+                  </a>
+                </div>
+              ) : visibleHabits.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-icon">✅</div>
+                  <h3>All set for today</h3>
+                  <p>Completed, skipped, and moved habits are hidden from the Home list.</p>
+                </div>
+              ) : (
+                visibleHabits.map((habit) => (
+                  <div
+                    key={habit.id}
+                    className={`habit-item ${todayTracking[habit.id] ? 'completed' : ''}`}
+                  >
+                    <div className="habit-checkbox">
+                      {todayTracking[habit.id] && <span className="checkmark">✓</span>}
+                    </div>
+                    <div className="habit-content">
+                      <div className="habit-icon">{habit.icon}</div>
+                      <div className="habit-details">
+                        <h3>{habit.name}</h3>
+                        <span className="habit-category">
+                          {habit.category}
+                          {` • Streak ${streakMap[habit.id] || 0}d`}
+                          {todayStatus[habit.id] === 'skipped' ? ' • Skipped today' : ''}
+                          {todayStatus[habit.id] === 'rescheduled' ? ' • Moved to pending' : ''}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="habit-actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => toggleHabit(habit.id)}
+                        disabled={isCheat}
+                      >
+                        {todayTracking[habit.id] ? 'Undo' : 'Done'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => skipHabitForToday(habit)}
+                        disabled={actionLoading === `skip-${habit.id}`}
+                      >
+                        Skip Today
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => moveHabit(habit, getDateAfterDays(1))}
+                        disabled={actionLoading === `move-${habit.id}`}
+                      >
+                        Tomorrow
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => moveHabit(habit, getNextWeekdayDate(userData?.cheatDay || 'sunday'))}
+                        disabled={actionLoading === `move-${habit.id}`}
+                      >
+                        Cheat Day
+                      </button>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginLeft: 'auto' }}>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {!prioritizeTodo && todoSection}
+
+        {pendingTasks.length > 0 && (
+          <div className="chart-container home-section">
+            <h3 style={{ marginBottom: '0.75rem' }}>Pending Work ({pendingTasks.length})</h3>
+            <div className="home-list-stack">
+              {pendingTasks.map((task) => (
+                <div
+                  key={task.id}
+                  className="pending-item"
+                >
+                  <div>
+                    <strong>{task.habitName}</strong>
+                    <div className="pending-meta-row">
+                      <span className="pending-chip pending-chip-source">From {task.sourceDate}</span>
+                      <span className="pending-arrow">→</span>
+                      <span className="pending-chip pending-chip-due">Due {task.dueDate}</span>
+                    </div>
+                  </div>
+                  <div className="pending-actions">
                     <button
                       type="button"
                       className="btn btn-primary"
-                      onClick={() => toggleHabit(habit.id)}
-                      disabled={isCheat}
-                      style={{ padding: '0.45rem 0.75rem' }}
+                      onClick={() => resolveTask(task, 'done')}
+                      disabled={actionLoading === `pending-${task.id}-done`}
                     >
-                      {todayTracking[habit.id] ? 'Undo' : 'Done'}
+                      Done
                     </button>
                     <button
                       type="button"
                       className="btn btn-secondary"
-                      onClick={() => skipHabitForToday(habit)}
-                      disabled={actionLoading === `skip-${habit.id}`}
-                      style={{ padding: '0.45rem 0.75rem' }}
+                      onClick={() => resolveTask(task, 'skipped')}
+                      disabled={actionLoading === `pending-${task.id}-skipped`}
                     >
-                      Skip Today
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => moveHabit(habit, getDateAfterDays(1))}
-                      disabled={actionLoading === `move-${habit.id}`}
-                      style={{ padding: '0.45rem 0.75rem' }}
-                    >
-                      Tomorrow
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => moveHabit(habit, getNextWeekdayDate(userData?.cheatDay || 'sunday'))}
-                      disabled={actionLoading === `move-${habit.id}`}
-                      style={{ padding: '0.45rem 0.75rem' }}
-                    >
-                      Cheat Day
+                      Skip
                     </button>
                   </div>
                 </div>
-              ))
-            )}
+              ))}
+            </div>
           </div>
         )}
       </div>

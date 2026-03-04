@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { getUserHabits, getTrackingHistory } from '../utils/firebaseService';
-import { getDateString } from '../utils/dateUtils';
+import { getDateString, getHabitStreakMap, isCheatDayForDate } from '../utils/dateUtils';
 
 const SERIES_COLORS = [
   '#2563eb',
@@ -67,14 +67,45 @@ const getSeriesPoints = (values, height, xStep) =>
       value
     }));
 
-function Stats({ user, userData }) {
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+const previewHabits = [
+  { id: 'p1', name: 'Morning Walk', icon: '🚶', createdAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'p2', name: 'Deep Work Sprint', icon: '💻', createdAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'p3', name: 'Read 20 mins', icon: '📚', createdAt: '2026-01-01T00:00:00.000Z' }
+];
+
+const buildPreviewHistory = () => {
+  const out = {};
+  for (let i = 0; i < 30; i++) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    const key = getDateString(date);
+    out[key] = {
+      p1: true,
+      p2: i % 3 !== 0,
+      p3: i % 4 !== 0
+    };
+  }
+  return out;
+};
+
+function Stats({ user, userData, isPreview = false }) {
   const [habits, setHabits] = useState([]);
   const [trackingHistory, setTrackingHistory] = useState({});
   const [loading, setLoading] = useState(true);
   const [selectedRange, setSelectedRange] = useState(30);
   const [chartMode, setChartMode] = useState('combined');
+  const cheatDay = String(userData?.cheatDay || 'sunday').toLowerCase();
 
   useEffect(() => {
+    if (isPreview) {
+      setHabits(previewHabits);
+      setTrackingHistory(buildPreviewHistory());
+      setLoading(false);
+      return;
+    }
+
     const loadData = async () => {
       setLoading(true);
       try {
@@ -94,7 +125,7 @@ function Stats({ user, userData }) {
     };
 
     loadData();
-  }, [user.uid]);
+  }, [isPreview, user?.uid]);
 
   const chartData = useMemo(() => {
     if (habits.length === 0) {
@@ -119,6 +150,8 @@ function Stats({ user, userData }) {
     });
 
     const combinedSeries = dateKeys.map((dateKey) => {
+      const date = new Date(`${dateKey}T00:00:00`);
+      if (isCheatDayForDate(date, cheatDay)) return null;
       const dayTracking = trackingHistory[dateKey] || {};
       const startedHabits = habits.filter((_, idx) => habitStarts[idx] <= dateKey);
       if (startedHabits.length === 0) return null;
@@ -129,6 +162,8 @@ function Stats({ user, userData }) {
     const habitSeries = habits.map((habit, idx) => {
       const startKey = habitStarts[idx];
       const values = dateKeys.map((dateKey) => {
+        const date = new Date(`${dateKey}T00:00:00`);
+        if (isCheatDayForDate(date, cheatDay)) return null;
         if (dateKey < startKey) return null;
         const dayTracking = trackingHistory[dateKey] || {};
         return dayTracking[habit.id] ? 100 : 0;
@@ -148,14 +183,19 @@ function Stats({ user, userData }) {
       }),
       combinedSeries,
       habitSeries,
-      daysTracked: days.length
+      daysTracked: days.filter((day) => !isCheatDayForDate(day, cheatDay)).length
     };
-  }, [habits, trackingHistory, selectedRange]);
+  }, [habits, trackingHistory, selectedRange, cheatDay]);
 
   const combinedValues = chartData.combinedSeries.filter((value) => value !== null);
   const overallCompletion = combinedValues.length
     ? Math.round(combinedValues.reduce((sum, value) => sum + value, 0) / combinedValues.length)
     : 0;
+  const streakMap = useMemo(
+    () => getHabitStreakMap(habits, trackingHistory, cheatDay),
+    [habits, trackingHistory, cheatDay]
+  );
+  const bestStreak = Object.values(streakMap).reduce((max, value) => Math.max(max, value), 0);
   const dailyProgress =
     chartData.combinedSeries.length > 0
       ? chartData.combinedSeries[chartData.combinedSeries.length - 1] || 0
@@ -165,6 +205,55 @@ function Stats({ user, userData }) {
   const chartHeight = 220;
   const xStep = selectedRange === 90 ? 16 : selectedRange === 30 ? 24 : 34;
   const chartWidth = Math.max((chartData.labels.length - 1) * xStep, 320);
+
+  const dayInsights = useMemo(() => {
+    const stats = WEEKDAYS.reduce((acc, day) => {
+      acc[day] = { total: 0, completed: 0 };
+      return acc;
+    }, {});
+
+    Object.entries(trackingHistory || {}).forEach(([dateKey, habitsMap]) => {
+      const date = new Date(`${dateKey}T00:00:00`);
+      if (Number.isNaN(date.getTime())) return;
+      if (isCheatDayForDate(date, cheatDay)) return;
+      const dayName = WEEKDAYS[date.getDay()];
+      const values = Object.values(habitsMap || {});
+      if (!values.length) return;
+      stats[dayName].total += values.length;
+      stats[dayName].completed += values.filter(Boolean).length;
+    });
+
+    const ranked = WEEKDAYS.map((day) => {
+      const total = stats[day].total || 0;
+      const completion = total ? Math.round((stats[day].completed / total) * 100) : 0;
+      return { day, completion };
+    }).sort((a, b) => b.completion - a.completion);
+
+    return {
+      ranked,
+      best: ranked[0] || { day: 'N/A', completion: 0 },
+      worst: ranked[ranked.length - 1] || { day: 'N/A', completion: 0 }
+    };
+  }, [trackingHistory, cheatDay]);
+
+  const heatmapDays = useMemo(() => {
+    const out = [];
+    const today = new Date();
+    for (let i = 89; i >= 0; i -= 1) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const key = getDateString(d);
+      if (isCheatDayForDate(d, cheatDay)) {
+        out.push({ key, ratio: null });
+        continue;
+      }
+      const dayData = trackingHistory[key] || {};
+      const values = Object.values(dayData);
+      const ratio = values.length ? values.filter(Boolean).length / values.length : 0;
+      out.push({ key, ratio });
+    }
+    return out;
+  }, [trackingHistory, cheatDay]);
 
   if (loading) {
     return (
@@ -207,6 +296,40 @@ function Stats({ user, userData }) {
           <div className="stat-card">
             <div className="stat-label">Daily Progress</div>
             <div className="stat-value">{dailyProgress}%</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Best Current Streak</div>
+            <div className="stat-value">{bestStreak}d</div>
+          </div>
+        </div>
+
+        <div className="chart-container">
+          <div className="chart-header">
+            <h2>Insights</h2>
+          </div>
+          <p style={{ marginTop: '0.9rem', color: 'var(--text-secondary)' }}>
+            Best day: <strong>{dayInsights.best.day}</strong> ({dayInsights.best.completion}%)
+            {' • '}
+            Toughest day: <strong>{dayInsights.worst.day}</strong> ({dayInsights.worst.completion}%)
+          </p>
+          <div style={{ marginTop: '0.9rem', display: 'grid', gridTemplateColumns: 'repeat(18, minmax(0, 1fr))', gap: '4px' }}>
+            {heatmapDays.map((item) => {
+              const isCheat = item.ratio === null;
+              const alpha = isCheat ? 0.03 : item.ratio <= 0 ? 0.08 : Math.min(0.22 + item.ratio * 0.68, 0.9);
+              return (
+                <div
+                  key={item.key}
+                  title={isCheat ? `${item.key} • Cheat day` : `${item.key} • ${Math.round(item.ratio * 100)}%`}
+                  style={{
+                    width: '100%',
+                    aspectRatio: '1',
+                    borderRadius: '3px',
+                    border: '1px solid var(--border-color)',
+                    background: isCheat ? `rgba(148, 163, 184, ${alpha})` : `rgba(37, 99, 235, ${alpha})`
+                  }}
+                />
+              );
+            })}
           </div>
         </div>
 
@@ -293,7 +416,7 @@ function Stats({ user, userData }) {
                   <g>
                     <polyline
                       fill="none"
-                      stroke="#111827"
+                      stroke="var(--text-primary)"
                       strokeWidth="3"
                       points={pointsFromSeries(chartData.combinedSeries, chartWidth, chartHeight, xStep)}
                     />
@@ -303,7 +426,7 @@ function Stats({ user, userData }) {
                         cx={point.x}
                         cy={point.y}
                         r={point.idx === todayIndex ? 5 : 3}
-                        fill="#111827"
+                        fill="var(--text-primary)"
                       >
                         <title>{`Combined: ${point.value}%`}</title>
                       </circle>
@@ -323,10 +446,10 @@ function Stats({ user, userData }) {
               </div>
 
               <div className="profile-badges" style={{ marginTop: '0.75rem' }}>
-                <span className="badge" style={{ borderColor: '#111827', color: '#111827', fontWeight: 700 }}>
+                <span className="badge" style={{ borderColor: 'var(--text-primary)', color: 'var(--text-primary)', fontWeight: 700 }}>
                   Today Combined: {dailyProgress}%
                 </span>
-                <span className="badge" style={{ borderColor: '#111827', color: 'var(--text-primary)' }}>
+                <span className="badge" style={{ borderColor: 'var(--text-primary)', color: 'var(--text-primary)' }}>
                   Combined Performance
                 </span>
                 {chartMode === 'detailed' &&
@@ -339,6 +462,19 @@ function Stats({ user, userData }) {
               <p style={{ marginTop: '0.75rem', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
                 Timeline covers the recent {chartData.daysTracked} day(s).
               </p>
+
+              {habits.length > 0 && (
+                <div style={{ marginTop: '1rem' }}>
+                  <h3 style={{ fontSize: '1rem', marginBottom: '0.6rem' }}>Current Streak by Habit</h3>
+                  <div className="profile-badges">
+                    {habits.map((habit) => (
+                      <span key={`streak-${habit.id}`} className="badge">
+                        {habit.icon} {habit.name}: {streakMap[habit.id] || 0}d
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
