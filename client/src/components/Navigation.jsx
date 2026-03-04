@@ -4,7 +4,9 @@ import { Link, NavLink } from 'react-router-dom';
 function Navigation({ theme, onToggleTheme }) {
   const [logoFailed, setLogoFailed] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
-  const themeLabel = theme ? theme.charAt(0).toUpperCase() + theme.slice(1) : 'Theme';
+  const isDark = theme === 'dark';
+  const themeIcon = isDark ? '☀' : '🌙';
+  const themeAria = isDark ? 'Switch to light mode' : 'Switch to dark mode';
 
   return (
     <>
@@ -54,8 +56,8 @@ function Navigation({ theme, onToggleTheme }) {
             </NavLink>
           </div>
 
-          <button type="button" className="theme-toggle-btn" onClick={onToggleTheme} aria-label="Toggle theme">
-              <span className="nav-text">Theme: {themeLabel}</span>
+          <button type="button" className="theme-toggle-btn" onClick={onToggleTheme} aria-label={themeAria} title={themeAria}>
+              <span className="theme-toggle-icon" aria-hidden="true">{themeIcon}</span>
           </button>
         </div>
       </nav>
