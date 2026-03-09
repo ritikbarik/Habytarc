@@ -148,6 +148,8 @@ export const createTodo = async (uid, todoData) => {
     priority: String(todoData?.priority || 'medium').toLowerCase(),
     dueDate: String(todoData?.dueDate || getDateString()),
     recurrence: String(todoData?.recurrence || 'none').toLowerCase(),
+    reminderEnabled: Boolean(todoData?.reminderEnabled && String(todoData?.reminderTime || '').trim()),
+    reminderTime: String(todoData?.reminderTime || '').trim(),
     notes: String(todoData?.notes || '').trim(),
     subtasks,
     dayKey: String(todoData?.dayKey || getDateString()),
@@ -222,6 +224,8 @@ export const completeTodoWithRecurrence = async (uid, todoId) => {
     priority: String(todo?.priority || 'medium').toLowerCase(),
     dueDate: nextDue,
     recurrence,
+    reminderEnabled: Boolean(todo?.reminderEnabled && String(todo?.reminderTime || '').trim()),
+    reminderTime: String(todo?.reminderTime || '').trim(),
     notes: String(todo?.notes || ''),
     subtasks: Array.isArray(todo?.subtasks)
       ? todo.subtasks.map((item) => ({

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { completeTodoWithRecurrence, createTodo, deleteTodo, subscribeToTodos, updateTodo } from '../utils/firebaseService';
+import { completeTodoWithRecurrence, createTodo, deleteTodo, subscribeToTodos, updateTodo, updateUserProfile } from '../utils/firebaseService';
 import { getDateString } from '../utils/dateUtils';
+import TimeWheelPicker from '../components/TimeWheelPicker';
 
 const previewTodos = [
   { id: 'pt1', text: 'Prepare tomorrow plan', completed: false, priority: 'high', category: 'work', recurrence: 'none', createdAtMs: Date.now() - 100000 },
@@ -8,7 +9,7 @@ const previewTodos = [
   { id: 'pt3', text: 'Read 15 pages', completed: false, priority: 'low', category: 'learning', recurrence: 'none', createdAtMs: Date.now() - 300000 }
 ];
 
-function Todo({ user, isPreview = false }) {
+function Todo({ user, userData, onProfileUpdated, isPreview = false }) {
   const [todos, setTodos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newTodo, setNewTodo] = useState({
@@ -17,6 +18,8 @@ function Todo({ user, isPreview = false }) {
     priority: 'medium',
     dueDate: getDateString(),
     recurrence: 'none',
+    reminderEnabled: false,
+    reminderTime: '',
     notes: '',
     subtasksText: ''
   });
@@ -25,6 +28,8 @@ function Todo({ user, isPreview = false }) {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [todoDayKey, setTodoDayKey] = useState(() => getDateString());
+  const [todoReminderEnabled, setTodoReminderEnabled] = useState(Boolean(userData?.todoReminderEnabled));
+  const [reminderSaving, setReminderSaving] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -49,6 +54,61 @@ function Todo({ user, isPreview = false }) {
     return () => unsubscribe();
   }, [isPreview, user?.uid, todoDayKey]);
 
+  useEffect(() => {
+    setTodoReminderEnabled(Boolean(userData?.todoReminderEnabled));
+  }, [userData?.todoReminderEnabled]);
+
+  useEffect(() => {
+    if (isPreview) return;
+    if (!Array.isArray(todos) || todos.length === 0) return;
+
+    const processReachedReminders = async () => {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const current = `${hh}:${mm}`;
+      const todayKey = getDateString(now);
+      const canNotify = typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted';
+
+      todos.forEach(async (item) => {
+        if (!item || item.completed) return;
+        if (!item.reminderEnabled || !item.reminderTime) return;
+
+        const dueDate = String(item.dueDate || todayKey);
+        const reminderTime = String(item.reminderTime || '');
+        const isExpired = dueDate < todayKey || (dueDate === todayKey && reminderTime <= current);
+        if (!isExpired) return;
+
+        const stampKey = `habytarc_todo_cleanup_${user?.uid}_${item.id}_${todayKey}`;
+        if (localStorage.getItem(stampKey)) return;
+        localStorage.setItem(stampKey, '1');
+
+        const notifyStamp = `habytarc_todo_item_reminder_${user?.uid}_${item.id}_${todayKey}`;
+        if (dueDate === todayKey && reminderTime <= current && canNotify && !localStorage.getItem(notifyStamp)) {
+          localStorage.setItem(notifyStamp, '1');
+          try {
+            new Notification('HabytARC Task Reminder', {
+              body: item.text ? `Time for: ${item.text}` : 'You have a scheduled to-do reminder.',
+              tag: `todo_item_${item.id}_${todayKey}`
+            });
+          } catch (error) {
+            console.error('Todo page reminder notification failed:', error);
+          }
+        }
+
+        try {
+          await updateTodo(user.uid, item.id, { reminderEnabled: false, reminderTime: '' });
+        } catch (error) {
+          console.error('Failed to clear expired reminder from Todo page:', error);
+        }
+      });
+    };
+
+    processReachedReminders();
+    const timer = setInterval(processReachedReminders, 30 * 1000);
+    return () => clearInterval(timer);
+  }, [isPreview, todos, user?.uid]);
+
   const filteredTodos = useMemo(() => {
     if (filter === 'open') return todos.filter((item) => !item.completed);
     if (filter === 'done') return todos.filter((item) => item.completed);
@@ -60,6 +120,69 @@ function Todo({ user, isPreview = false }) {
 
   const lockAction = () => {
     alert('Login to continue');
+  };
+
+  const toggleTodoReminder = async () => {
+    if (isPreview) {
+      lockAction();
+      return;
+    }
+
+    const nextValue = !todoReminderEnabled;
+    setReminderSaving(true);
+    setTodoReminderEnabled(nextValue);
+
+    try {
+      if (typeof window !== 'undefined' && 'Notification' in window && nextValue) {
+        if (Notification.permission === 'default') {
+          await Notification.requestPermission();
+        }
+      }
+
+      await updateUserProfile(user.uid, { todoReminderEnabled: nextValue });
+      if (onProfileUpdated) {
+        await onProfileUpdated();
+      }
+      setSuccess(nextValue ? 'To-do reminders enabled.' : 'To-do reminders disabled.');
+    } catch (error) {
+      console.error('To-do reminder preference update failed:', error);
+      setTodoReminderEnabled(!nextValue);
+      setError(error?.message || 'Failed to update reminder preference.');
+    } finally {
+      setReminderSaving(false);
+    }
+  };
+
+  const sendTestNotification = async () => {
+    if (isPreview) {
+      lockAction();
+      return;
+    }
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setError('This browser does not support notifications.');
+      return;
+    }
+
+    try {
+      let permission = Notification.permission;
+      if (permission === 'default') {
+        permission = await Notification.requestPermission();
+      }
+      if (permission !== 'granted') {
+        setError('Notification permission is blocked. Allow notifications in your browser settings.');
+        return;
+      }
+
+      new Notification('HabytARC Test Notification', {
+        body: 'Notifications are working for this browser.',
+        tag: `habytarc_test_${Date.now()}`
+      });
+      setSuccess('Test notification sent.');
+      setError('');
+    } catch (error) {
+      console.error('Test notification failed:', error);
+      setError('Failed to send test notification.');
+    }
   };
 
   const handleAdd = async (event) => {
@@ -74,6 +197,28 @@ function Todo({ user, isPreview = false }) {
     }
     setSaving(true);
     try {
+      const reminderEnabled = Boolean(newTodo.reminderEnabled && String(newTodo.reminderTime || '').trim());
+      const reminderTime = reminderEnabled ? String(newTodo.reminderTime || '').trim() : '';
+      const dueDateKey = String(newTodo.dueDate || todoDayKey);
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const currentTime = `${hh}:${mm}`;
+      const todayKey = getDateString(now);
+
+      if (reminderEnabled) {
+        if (dueDateKey < todayKey) {
+          throw new Error('Cannot set a reminder for a past due date.');
+        }
+        if (dueDateKey === todayKey && reminderTime < currentTime) {
+          throw new Error('Cannot set a reminder for a past time.');
+        }
+      }
+
+      if (reminderEnabled && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+
       const subtasks = String(newTodo.subtasksText || '')
         .split(',')
         .map((item) => item.trim())
@@ -88,10 +233,12 @@ function Todo({ user, isPreview = false }) {
         text: trimmed,
         category: newTodo.category,
         priority: newTodo.priority,
-        dueDate: newTodo.dueDate || todoDayKey,
+        dueDate: dueDateKey,
         recurrence: newTodo.recurrence,
+        reminderEnabled,
+        reminderTime,
         notes: newTodo.notes,
-        dayKey: newTodo.dueDate || todoDayKey,
+        dayKey: dueDateKey,
         subtasks
       });
       const optimistic = {
@@ -101,10 +248,12 @@ function Todo({ user, isPreview = false }) {
         completed: false,
         category: newTodo.category,
         priority: newTodo.priority,
-        dueDate: newTodo.dueDate || todoDayKey,
+        dueDate: dueDateKey,
         recurrence: newTodo.recurrence,
+        reminderEnabled,
+        reminderTime,
         notes: newTodo.notes,
-        dayKey: newTodo.dueDate || todoDayKey,
+        dayKey: dueDateKey,
         subtasks,
         createdAt: new Date().toISOString(),
         createdAtMs: Date.now()
@@ -119,6 +268,8 @@ function Todo({ user, isPreview = false }) {
         priority: 'medium',
         dueDate: getDateString(),
         recurrence: 'none',
+        reminderEnabled: false,
+        reminderTime: '',
         notes: '',
         subtasksText: ''
       });
@@ -229,6 +380,26 @@ function Todo({ user, isPreview = false }) {
         )}
 
         <div className="chart-container todo-composer">
+          <div className="todo-reminder-pref">
+            <label className="todo-reminder-label">
+              <input
+                type="checkbox"
+                checked={todoReminderEnabled}
+                onChange={toggleTodoReminder}
+                disabled={reminderSaving}
+              />
+              <span>Remind me about overdue and due-today to-dos</span>
+            </label>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={sendTestNotification}
+              disabled={reminderSaving}
+              style={{ padding: '0.4rem 0.7rem', fontSize: '0.82rem' }}
+            >
+              Test Notification
+            </button>
+          </div>
           <form onSubmit={handleAdd} className="todo-form">
             <div className="todo-form-primary">
               <input
@@ -281,6 +452,21 @@ function Todo({ user, isPreview = false }) {
                 <option value="weekly">Weekly</option>
                 <option value="monthly">Monthly</option>
               </select>
+              <label className="todo-item-reminder-toggle">
+                <input
+                  type="checkbox"
+                  checked={Boolean(newTodo.reminderEnabled)}
+                  onChange={(e) => setNewTodo((prev) => ({ ...prev, reminderEnabled: e.target.checked }))}
+                  disabled={saving}
+                />
+                <span>Task reminder</span>
+              </label>
+              <TimeWheelPicker
+                value={newTodo.reminderTime}
+                onChange={(value) => setNewTodo((prev) => ({ ...prev, reminderTime: value }))}
+                className="todo-field-sm"
+                disabled={saving || !newTodo.reminderEnabled}
+              />
               <input
                 type="text"
                 value={newTodo.subtasksText}
@@ -332,6 +518,7 @@ function Todo({ user, isPreview = false }) {
                       {` • ${item.category || 'general'}`}
                       {item.dueDate ? ` • Due ${item.dueDate}` : ''}
                       {item.recurrence && item.recurrence !== 'none' ? ` • Repeats ${item.recurrence}` : ''}
+                      {item.reminderEnabled && item.reminderTime ? ` • Reminder ${item.reminderTime}` : ''}
                     </span>
                     {item.notes ? (
                       <p style={{ color: 'var(--text-secondary)', marginTop: '0.25rem', fontSize: '0.85rem' }}>

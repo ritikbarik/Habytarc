@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { subscribeToHabits, createHabit, updateHabit, deleteHabit, getTrackingHistory, getUserProfile } from '../utils/firebaseService';
 import { getHabitStreakMap } from '../utils/dateUtils';
+import TimeWheelPicker from '../components/TimeWheelPicker';
 
 const previewHabits = [
-  { id: 'p1', name: 'Morning Walk', category: 'Health', icon: '🚶', enabled: true },
+  { id: 'p1', name: 'Morning Walk', category: 'Health', icon: '🚶', enabled: true, reminderEnabled: true, reminderTime: '07:30' },
   { id: 'p2', name: 'Deep Work Sprint', category: 'Work', icon: '💻', enabled: true },
   { id: 'p3', name: 'Read 20 mins', category: 'Learning', icon: '📚', enabled: true }
 ];
@@ -15,10 +16,13 @@ function Habits({ user, isPreview = false }) {
   const [submitting, setSubmitting] = useState(false);
   const [trackingHistory, setTrackingHistory] = useState({});
   const [cheatDay, setCheatDay] = useState('sunday');
+  const [reminderDrafts, setReminderDrafts] = useState({});
   const [newHabit, setNewHabit] = useState({
     name: '',
     category: 'Work',
-    icon: '⭐'
+    icon: '⭐',
+    reminderEnabled: false,
+    reminderTime: ''
   });
 
   const categories = ['Work', 'Health', 'Learning', 'Lifestyle', 'Social'];
@@ -66,6 +70,26 @@ function Habits({ user, isPreview = false }) {
     [habits, trackingHistory, cheatDay]
   );
 
+  useEffect(() => {
+    const nextDrafts = {};
+    habits.forEach((habit) => {
+      nextDrafts[habit.id] = String(habit.reminderTime || '');
+    });
+    setReminderDrafts(nextDrafts);
+  }, [habits]);
+
+  const requestReminderPermissionIfNeeded = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return false;
+    if (Notification.permission === 'granted') return true;
+    if (Notification.permission === 'denied') return false;
+    try {
+      const permission = await Notification.requestPermission();
+      return permission === 'granted';
+    } catch (error) {
+      return false;
+    }
+  };
+
   const handleAddHabit = async (e) => {
     e.preventDefault();
     if (isPreview) {
@@ -75,14 +99,51 @@ function Habits({ user, isPreview = false }) {
     setSubmitting(true);
 
     try {
-      await createHabit(user.uid, newHabit);
-      setNewHabit({ name: '', category: 'Work', icon: '⭐' });
+      const reminderTime = String(newHabit.reminderTime || '');
+      const reminderEnabled = Boolean(newHabit.reminderEnabled && reminderTime);
+      if (reminderEnabled) {
+        await requestReminderPermissionIfNeeded();
+      }
+
+      await createHabit(user.uid, {
+        name: newHabit.name,
+        category: newHabit.category,
+        icon: newHabit.icon,
+        reminderEnabled,
+        reminderTime: reminderEnabled ? reminderTime : ''
+      });
+      setNewHabit({ name: '', category: 'Work', icon: '⭐', reminderEnabled: false, reminderTime: '' });
       setShowAddForm(false);
     } catch (err) {
       console.error('Error:', err);
       alert('Failed to add habit. Please try again.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const saveHabitReminder = async (habit, nextTime) => {
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
+    const cleanedTime = String(nextTime || '').trim();
+    const reminderEnabled = Boolean(cleanedTime);
+    if (reminderEnabled) {
+      const granted = await requestReminderPermissionIfNeeded();
+      if (!granted) {
+        alert('Browser notification permission is not granted. Enable it in browser settings to receive reminders.');
+      }
+    }
+    try {
+      await updateHabit(habit.id, {
+        reminderEnabled,
+        reminderTime: reminderEnabled ? cleanedTime : ''
+      });
+    } catch (error) {
+      console.error('Failed to save reminder:', error);
+      alert('Failed to save habit reminder.');
+      setReminderDrafts((prev) => ({ ...prev, [habit.id]: String(habit.reminderTime || '') }));
     }
   };
 
@@ -221,6 +282,26 @@ function Habits({ user, isPreview = false }) {
                   </div>
                 </div>
 
+                <div className="form-group">
+                  <label>Daily Reminder (Optional)</label>
+                  <div className="habit-reminder-builder">
+                    <label className="habit-reminder-toggle">
+                      <input
+                        type="checkbox"
+                        checked={newHabit.reminderEnabled}
+                        onChange={(e) => setNewHabit({ ...newHabit, reminderEnabled: e.target.checked })}
+                        disabled={submitting}
+                      />
+                      <span>Enable browser reminder</span>
+                    </label>
+                    <TimeWheelPicker
+                      value={newHabit.reminderTime}
+                      onChange={(value) => setNewHabit({ ...newHabit, reminderTime: value })}
+                      disabled={submitting || !newHabit.reminderEnabled}
+                    />
+                  </div>
+                </div>
+
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
                   <button 
                     type="button" 
@@ -258,6 +339,32 @@ function Habits({ user, isPreview = false }) {
                   <div className="habit-details">
                     <h3>{habit.name}</h3>
                     <span className="habit-category">{habit.category} • Streak {streakMap[habit.id] || 0}d</span>
+                    <div className="habit-reminder-row">
+                      <span className="habit-reminder-label">
+                        Reminder: {habit.reminderEnabled && habit.reminderTime ? habit.reminderTime : 'Off'}
+                      </span>
+                      <TimeWheelPicker
+                        value={reminderDrafts[habit.id] ?? String(habit.reminderTime || '')}
+                        onChange={(value) => {
+                          setReminderDrafts((prev) => ({ ...prev, [habit.id]: value }));
+                          saveHabitReminder(habit, value);
+                        }}
+                        disabled={isPreview}
+                        className="habit-reminder-input"
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          setReminderDrafts((prev) => ({ ...prev, [habit.id]: '' }));
+                          saveHabitReminder(habit, '');
+                        }}
+                        disabled={isPreview}
+                        style={{ padding: '0.35rem 0.65rem', fontSize: '0.8rem' }}
+                      >
+                        Clear
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>

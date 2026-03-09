@@ -143,7 +143,17 @@ function App() {
           />
           <Route
             path="/todo"
-            element={user && userData ? <Todo user={user} /> : <Navigate to="/login" />}
+            element={
+              user && userData ? (
+                <Todo
+                  user={user}
+                  userData={userData}
+                  onProfileUpdated={refreshUserData}
+                />
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
           />
           <Route 
             path="/profile" 

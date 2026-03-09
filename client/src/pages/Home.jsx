@@ -4,16 +4,17 @@ import {
   completeTodoWithRecurrence,
   subscribeToHabits,
   subscribeToTodos,
+  updateTodo,
   getTrackingDocForDate,
   getTrackingHistory,
   saveTracking,
-  saveHabitNote,
   setHabitDayStatus,
   upsertPendingTask,
   getPendingTasksUpToDate,
   resolvePendingTask
 } from '../utils/firebaseService';
 import { isCheatDay, getDateAfterDays, getDateString, getNextWeekdayDate, getTodayProgress, getHabitStreakMap } from '../utils/dateUtils';
+import { fetchWeatherSnapshot, isSevereWeatherCode } from '../utils/weatherService';
 
 const refreshQuotes = [
   'You do not rise to the level of your goals. You fall to the level of your systems.',
@@ -40,6 +41,56 @@ const getRefreshQuote = () => {
   return refreshQuotes[index];
 };
 
+const formatClockValue = (date, timezone) => {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+      timeZone: timezone || undefined
+    }).format(date);
+  } catch (_) {
+    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  }
+};
+
+const formatDateValue = (date, timezone) => {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: timezone || undefined
+    }).format(date);
+  } catch (_) {
+    return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  }
+};
+
+const getWeatherInsight = (weatherInfo, pendingHabits, openTodos) => {
+  if (!weatherInfo || Number.isNaN(Number(weatherInfo.temperatureC))) return '';
+
+  const wind = Number(weatherInfo.windSpeedKmh || 0);
+  const rain = Number(weatherInfo.precipitationMm || 0);
+  const temp = Number(weatherInfo.temperatureC || 0);
+
+  let conditionText = 'Weather looks steady outside';
+  if (wind >= 20) conditionText = 'Feels windy outside';
+  else if (rain >= 0.5) conditionText = "It's a bit rainy outside";
+  else if (temp >= 32) conditionText = "It's quite warm outside";
+  else if (temp <= 15) conditionText = "It's a bit cool outside";
+
+  if (pendingHabits > 0) {
+    return `${conditionText}, but you still have ${pendingHabits} habit${pendingHabits === 1 ? '' : 's'} pending.`;
+  }
+  if (openTodos > 0) {
+    return `${conditionText}, and you have ${openTodos} open to-do${openTodos === 1 ? '' : 's'}.`;
+  }
+  return `${conditionText}, and you're clear on today's tasks.`;
+};
+
 const previewHabits = [
   { id: 'p1', name: 'Morning Walk', category: 'Health', icon: '🚶' },
   { id: 'p2', name: 'Deep Work Sprint', category: 'Work', icon: '💻' },
@@ -64,6 +115,20 @@ function Home({ user, userData, isPreview = false }) {
   const [actionLoading, setActionLoading] = useState('');
   const [quote] = useState(() => getRefreshQuote());
   const [todoDayKey, setTodoDayKey] = useState(() => getDateString());
+  const [weatherInfo, setWeatherInfo] = useState({
+    loading: false,
+    error: '',
+    cityLabel: '',
+    timezone: '',
+    currentTimeIso: '',
+    temperatureC: NaN,
+    apparentTemperatureC: NaN,
+    precipitationMm: NaN,
+    windSpeedKmh: NaN,
+    weatherCode: -1,
+    weatherLabel: ''
+  });
+  const [clockNow, setClockNow] = useState(() => new Date());
 
   const today = getDateString();
 
@@ -74,6 +139,89 @@ function Home({ user, userData, isPreview = false }) {
     }, 60 * 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const runFetch = async () => {
+      setWeatherInfo((prev) => ({ ...prev, loading: true, error: '' }));
+      try {
+        const snapshot = await fetchWeatherSnapshot();
+        if (!mounted) return;
+        setWeatherInfo({
+          loading: false,
+          error: '',
+          ...snapshot
+        });
+      } catch (error) {
+        if (!mounted) return;
+        setWeatherInfo((prev) => ({
+          ...prev,
+          loading: false,
+          error: 'Weather unavailable. Enable location access to see live weather.'
+        }));
+      }
+    };
+
+    runFetch();
+    const intervalId = setInterval(runFetch, 15 * 60 * 1000);
+    return () => {
+      mounted = false;
+      clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    const apiTimeMs = Date.parse(String(weatherInfo.currentTimeIso || ''));
+    if (Number.isNaN(apiTimeMs)) {
+      const fallbackId = setInterval(() => setClockNow(new Date()), 1000);
+      setClockNow(new Date());
+      return () => clearInterval(fallbackId);
+    }
+
+    const startedAt = Date.now();
+    const tick = () => {
+      const delta = Date.now() - startedAt;
+      setClockNow(new Date(apiTimeMs + delta));
+    };
+    tick();
+    const timerId = setInterval(tick, 1000);
+    return () => clearInterval(timerId);
+  }, [weatherInfo.currentTimeIso]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (!weatherInfo.currentTimeIso || Number.isNaN(Number(weatherInfo.weatherCode))) return;
+    if (!isSevereWeatherCode(weatherInfo.weatherCode)) return;
+
+    const dayKey = getDateString(new Date());
+    const alertStamp = `habytarc_weather_alert_${dayKey}`;
+    if (localStorage.getItem(alertStamp)) return;
+
+    const notify = () => {
+      if (Notification.permission !== 'granted') return;
+      localStorage.setItem(alertStamp, '1');
+      try {
+        new Notification('HabytARC Weather Alert', {
+          body: `${weatherInfo.weatherLabel} in ${weatherInfo.cityLabel || 'your area'}. Plan your tasks accordingly.`,
+          tag: `weather_alert_${dayKey}`
+        });
+      } catch (error) {
+        console.error('Weather alert notification failed:', error);
+      }
+    };
+
+    if (Notification.permission === 'granted') {
+      notify();
+      return;
+    }
+    if (Notification.permission === 'default') {
+      Notification.requestPermission()
+        .then((permission) => {
+          if (permission === 'granted') notify();
+        })
+        .catch(() => {});
+    }
+  }, [weatherInfo.currentTimeIso, weatherInfo.weatherCode, weatherInfo.weatherLabel, weatherInfo.cityLabel]);
 
   useEffect(() => {
     if (isPreview) {
@@ -139,13 +287,13 @@ function Home({ user, userData, isPreview = false }) {
   useEffect(() => {
     if (isPreview) return;
     if (typeof window === 'undefined' || !('Notification' in window)) return;
-    if (Notification.permission === 'default' && habits.some((habit) => Boolean(habit.reminderTime))) {
+    if (Notification.permission === 'default' && habits.some((habit) => Boolean(habit.reminderEnabled && habit.reminderTime))) {
       Notification.requestPermission().catch(() => {});
     }
-    if (Notification.permission !== 'granted') return;
     if (!Array.isArray(habits) || habits.length === 0) return;
 
     const timer = setInterval(() => {
+      if (Notification.permission !== 'granted') return;
       const now = new Date();
       const hh = String(now.getHours()).padStart(2, '0');
       const mm = String(now.getMinutes()).padStart(2, '0');
@@ -154,7 +302,7 @@ function Home({ user, userData, isPreview = false }) {
 
       habits.forEach((habit) => {
         const reminderTime = String(habit.reminderTime || '');
-        if (!reminderTime || reminderTime !== current) return;
+        if (!habit.reminderEnabled || !reminderTime || reminderTime !== current) return;
         const stampKey = `habytarc_reminder_${user?.uid}_${habit.id}_${dayKey}`;
         if (localStorage.getItem(stampKey)) return;
         localStorage.setItem(stampKey, '1');
@@ -172,6 +320,113 @@ function Home({ user, userData, isPreview = false }) {
     return () => clearInterval(timer);
   }, [habits, isPreview, user?.uid]);
 
+  useEffect(() => {
+    if (isPreview) return;
+    if (!userData?.todoReminderEnabled) return;
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+
+    const openItems = Array.isArray(todos) ? todos.filter((todo) => !todo.completed) : [];
+    if (openItems.length === 0) return;
+
+    const todayKey = getDateString();
+    const overdue = openItems.filter((todo) => {
+      const due = String(todo?.dueDate || '');
+      return due && due < todayKey;
+    }).length;
+    const dueToday = openItems.filter((todo) => String(todo?.dueDate || '') === todayKey).length;
+    if (overdue === 0 && dueToday === 0) return;
+
+    const sendDigest = () => {
+      const digestKey = `habytarc_todo_digest_${user?.uid}_${todayKey}`;
+      if (localStorage.getItem(digestKey)) return;
+      localStorage.setItem(digestKey, '1');
+
+      const chunks = [];
+      if (overdue > 0) chunks.push(`${overdue} overdue`);
+      if (dueToday > 0) chunks.push(`${dueToday} due today`);
+      const body = `${chunks.join(' • ')}. Open the To-Do page to review tasks.`;
+
+      try {
+        new Notification('HabytARC To-Do Reminder', { body, tag: `todo_digest_${todayKey}` });
+      } catch (error) {
+        console.error('To-do digest notification failed:', error);
+      }
+    };
+
+    if (Notification.permission === 'granted') {
+      sendDigest();
+      return;
+    }
+    if (Notification.permission === 'default') {
+      Notification.requestPermission()
+        .then((permission) => {
+          if (permission === 'granted') sendDigest();
+        })
+        .catch(() => {});
+    }
+  }, [isPreview, todos, user?.uid, userData?.todoReminderEnabled]);
+
+  useEffect(() => {
+    if (isPreview) return;
+    if (!userData?.todoReminderEnabled) return;
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    const openItems = Array.isArray(todos) ? todos.filter((todo) => !todo.completed) : [];
+    const todayKey = getDateString();
+    const reminderItems = openItems.filter((todo) => {
+      if (!todo?.reminderEnabled || !todo?.reminderTime) return false;
+      const dueDate = String(todo?.dueDate || todayKey);
+      return dueDate === todayKey;
+    });
+    if (reminderItems.length === 0) return;
+
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+
+    const disableReminder = async (todoItem, dayKey) => {
+      const offStamp = `habytarc_todo_item_reminder_off_${user?.uid}_${todoItem.id}_${dayKey}`;
+      if (localStorage.getItem(offStamp)) return;
+      localStorage.setItem(offStamp, '1');
+      try {
+        await updateTodo(user.uid, todoItem.id, { reminderEnabled: false, reminderTime: '' });
+      } catch (error) {
+        console.error('Failed to auto-disable task reminder:', error);
+      }
+    };
+
+    const timer = setInterval(() => {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const current = `${hh}:${mm}`;
+      const dayKey = getDateString(now);
+
+      reminderItems.forEach(async (todoItem) => {
+        const reminderTime = String(todoItem.reminderTime || '');
+        if (!reminderTime) return;
+
+        if (reminderTime > current) return;
+
+        const stampKey = `habytarc_todo_item_reminder_${user?.uid}_${todoItem.id}_${dayKey}`;
+        if (reminderTime === current && Notification.permission === 'granted' && !localStorage.getItem(stampKey)) {
+          localStorage.setItem(stampKey, '1');
+          try {
+            new Notification('HabytARC Task Reminder', {
+              body: todoItem.text ? `Time for: ${todoItem.text}` : 'You have a scheduled to-do reminder.',
+              tag: `todo_item_${todoItem.id}_${dayKey}`
+            });
+          } catch (error) {
+            console.error('To-do item reminder failed:', error);
+          }
+        }
+
+        await disableReminder(todoItem, dayKey);
+      });
+    }, 60 * 1000);
+
+    return () => clearInterval(timer);
+  }, [isPreview, todos, user?.uid, userData?.todoReminderEnabled]);
+
   const toggleHabit = async (habitId) => {
     if (isPreview) {
       alert('Login to continue');
@@ -187,12 +442,6 @@ function Home({ user, userData, isPreview = false }) {
 
     try {
       await saveTracking(user.uid, today, habitId, newValue);
-      if (newValue) {
-        const note = window.prompt('Add a quick note for this habit (optional):', '');
-        if (note && note.trim()) {
-          await saveHabitNote(user.uid, today, habitId, note.trim());
-        }
-      }
     } catch (err) {
       console.error('Error saving:', err);
       const code = err?.code ? ` (${err.code})` : '';
@@ -316,6 +565,10 @@ function Home({ user, userData, isPreview = false }) {
   const openTodos = todos.filter((item) => !item.completed).length;
   const openTodoItems = useMemo(() => todos.filter((item) => !item.completed), [todos]);
   const greeting = getGreetingByTime(userData?.name || user?.displayName);
+  const pendingHabitsCount = visibleHabits.length;
+  const weatherInsight = getWeatherInsight(weatherInfo, pendingHabitsCount, openTodos);
+  const weatherTimeText = formatClockValue(clockNow, weatherInfo.timezone);
+  const weatherDateText = formatDateValue(clockNow, weatherInfo.timezone);
   const prioritizeTodo = !isCheat && visibleHabits.length === 0 && openTodoItems.length > 0;
 
   const todoSection = (
@@ -377,7 +630,10 @@ function Home({ user, userData, isPreview = false }) {
               {isCheat ? (
                 <span className="cheat-day-badge">🎉 Cheat Day - Rest & Recharge</span>
               ) : (
-                <span>{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+                <span>
+                  {weatherDateText} • {weatherTimeText}
+                  {weatherInsight ? ` • ${weatherInsight}` : ''}
+                </span>
               )}
             </p>
           </div>

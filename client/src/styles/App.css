@@ -348,6 +348,7 @@
   gap: 0.5rem;
 }
 
+
 .todo-snapshot-item,
 .pending-item {
   border: 1px solid var(--border-color);
@@ -1140,13 +1141,26 @@
 
 .todo-form-advanced {
   display: grid;
-  grid-template-columns: repeat(4, minmax(120px, 1fr)) 1.2fr 1.2fr;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
   gap: 0.6rem;
   align-items: center;
   padding: 0.55rem;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
+}
+
+.todo-item-reminder-toggle {
+  min-height: 42px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0 0.65rem;
+  font-size: 0.84rem;
 }
 
 .todo-field-sm {
@@ -1157,6 +1171,82 @@
   display: flex;
   gap: 0.5rem;
   margin-top: 0.8rem;
+}
+
+.todo-reminder-pref {
+  margin-bottom: 0.8rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.todo-reminder-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+}
+
+.habit-reminder-builder {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.habit-reminder-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.86rem;
+  color: var(--text-secondary);
+}
+
+.habit-reminder-row {
+  margin-top: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.habit-reminder-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.habit-reminder-input {
+  min-width: 160px;
+}
+
+.time-wheel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.time-wheel-select {
+  min-width: 68px;
+  height: 34px;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 0.83rem;
+}
+
+.time-wheel-sep {
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 
 @media (max-width: 900px) {
@@ -1189,6 +1279,51 @@
 
   .todo-filter-row {
     flex-wrap: wrap;
+  }
+
+}
+
+@media (max-width: 640px) {
+  .todo-form-advanced {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+
+  .todo-form-advanced .chat-input,
+  .todo-form-advanced .todo-field-sm {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .todo-form-advanced .time-wheel {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .todo-form-advanced .time-wheel-select {
+    width: 100%;
+  }
+
+  .todo-reminder-pref {
+    padding: 0.6rem;
+  }
+
+  .todo-reminder-label {
+    width: 100%;
+    align-items: flex-start;
+    line-height: 1.35;
+    font-size: 0.84rem;
+  }
+
+  .todo-filter-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .todo-filter-row .btn {
+    width: 100%;
+    padding: 0.55rem 0.4rem;
   }
 }
 

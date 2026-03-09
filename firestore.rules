@@ -9,6 +9,14 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
+    function isOwnerTrackingId(trackingId) {
+      return isSignedIn()
+        && (
+          trackingId.matches('^v2_' + request.auth.uid + '_.*$')
+          || trackingId.matches('^' + request.auth.uid + '_.*$')
+        );
+    }
+
     match /users/{uid} {
       allow read, create, update, delete: if isOwner(uid);
 
@@ -39,14 +47,36 @@ service cloud.firestore {
 
     match /tracking/{trackingId} {
       allow create: if isSignedIn()
-        && request.resource.data.userId == request.auth.uid;
+        && (
+          request.resource.data.userId == request.auth.uid
+          || isOwnerTrackingId(trackingId)
+        );
 
       allow read, delete: if isSignedIn()
-        && resource.data.userId == request.auth.uid;
+        && (
+          // Current docs
+          resource.data.userId == request.auth.uid
+          // Backward compatibility: allow owner migration for legacy docs
+          || !('userId' in resource.data)
+          // Also allow access by owner-encoded tracking doc ID
+          || isOwnerTrackingId(trackingId)
+        );
 
       allow update: if isSignedIn()
-        && resource.data.userId == request.auth.uid
-        && request.resource.data.userId == resource.data.userId;
+        && (
+          // Current docs
+          (
+            resource.data.userId == request.auth.uid
+            && request.resource.data.userId == resource.data.userId
+          )
+          // Legacy docs without userId: allow stamping userId on first update
+          || (
+            !('userId' in resource.data)
+            && request.resource.data.userId == request.auth.uid
+          )
+          // Fallback for legacy/malformed docs keyed by owner UID
+          || isOwnerTrackingId(trackingId)
+        );
     }
 
     match /feedback/{feedbackId} {
