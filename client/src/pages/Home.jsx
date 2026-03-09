@@ -15,6 +15,7 @@ import {
 } from '../utils/firebaseService';
 import { isCheatDay, getDateAfterDays, getDateString, getNextWeekdayDate, getTodayProgress, getHabitStreakMap } from '../utils/dateUtils';
 import { fetchWeatherSnapshot, isSevereWeatherCode } from '../utils/weatherService';
+import { requestNotificationPermission, sendAppNotification, isNotificationSupported } from '../utils/notificationService';
 
 const refreshQuotes = [
   'You do not rise to the level of your goals. You fall to the level of your systems.',
@@ -201,7 +202,7 @@ function Home({ user, userData, isPreview = false }) {
       if (Notification.permission !== 'granted') return;
       localStorage.setItem(alertStamp, '1');
       try {
-        new Notification('HabytARC Weather Alert', {
+        sendAppNotification('HabytARC Weather Alert', {
           body: `${weatherInfo.weatherLabel} in ${weatherInfo.cityLabel || 'your area'}. Plan your tasks accordingly.`,
           tag: `weather_alert_${dayKey}`
         });
@@ -215,7 +216,7 @@ function Home({ user, userData, isPreview = false }) {
       return;
     }
     if (Notification.permission === 'default') {
-      Notification.requestPermission()
+      requestNotificationPermission()
         .then((permission) => {
           if (permission === 'granted') notify();
         })
@@ -286,9 +287,9 @@ function Home({ user, userData, isPreview = false }) {
 
   useEffect(() => {
     if (isPreview) return;
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (!isNotificationSupported()) return;
     if (Notification.permission === 'default' && habits.some((habit) => Boolean(habit.reminderEnabled && habit.reminderTime))) {
-      Notification.requestPermission().catch(() => {});
+      requestNotificationPermission().catch(() => {});
     }
     if (!Array.isArray(habits) || habits.length === 0) return;
 
@@ -307,7 +308,7 @@ function Home({ user, userData, isPreview = false }) {
         if (localStorage.getItem(stampKey)) return;
         localStorage.setItem(stampKey, '1');
         try {
-          new Notification('HabytARC Reminder', {
+          sendAppNotification('HabytARC Reminder', {
             body: `Time for "${habit.name}"`,
             tag: `habit_${habit.id}_${dayKey}`
           });
@@ -323,7 +324,7 @@ function Home({ user, userData, isPreview = false }) {
   useEffect(() => {
     if (isPreview) return;
     if (!userData?.todoReminderEnabled) return;
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (!isNotificationSupported()) return;
 
     const openItems = Array.isArray(todos) ? todos.filter((todo) => !todo.completed) : [];
     if (openItems.length === 0) return;
@@ -347,7 +348,7 @@ function Home({ user, userData, isPreview = false }) {
       const body = `${chunks.join(' • ')}. Open the To-Do page to review tasks.`;
 
       try {
-        new Notification('HabytARC To-Do Reminder', { body, tag: `todo_digest_${todayKey}` });
+        sendAppNotification('HabytARC To-Do Reminder', { body, tag: `todo_digest_${todayKey}` });
       } catch (error) {
         console.error('To-do digest notification failed:', error);
       }
@@ -358,7 +359,7 @@ function Home({ user, userData, isPreview = false }) {
       return;
     }
     if (Notification.permission === 'default') {
-      Notification.requestPermission()
+      requestNotificationPermission()
         .then((permission) => {
           if (permission === 'granted') sendDigest();
         })
@@ -369,7 +370,7 @@ function Home({ user, userData, isPreview = false }) {
   useEffect(() => {
     if (isPreview) return;
     if (!userData?.todoReminderEnabled) return;
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (!isNotificationSupported()) return;
     const openItems = Array.isArray(todos) ? todos.filter((todo) => !todo.completed) : [];
     const todayKey = getDateString();
     const reminderItems = openItems.filter((todo) => {
@@ -380,7 +381,7 @@ function Home({ user, userData, isPreview = false }) {
     if (reminderItems.length === 0) return;
 
     if (Notification.permission === 'default') {
-      Notification.requestPermission().catch(() => {});
+      requestNotificationPermission().catch(() => {});
     }
 
     const disableReminder = async (todoItem, dayKey) => {
@@ -411,7 +412,7 @@ function Home({ user, userData, isPreview = false }) {
         if (reminderTime === current && Notification.permission === 'granted' && !localStorage.getItem(stampKey)) {
           localStorage.setItem(stampKey, '1');
           try {
-            new Notification('HabytARC Task Reminder', {
+            sendAppNotification('HabytARC Task Reminder', {
               body: todoItem.text ? `Time for: ${todoItem.text}` : 'You have a scheduled to-do reminder.',
               tag: `todo_item_${todoItem.id}_${dayKey}`
             });

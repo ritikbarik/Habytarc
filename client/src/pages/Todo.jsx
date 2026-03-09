@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { completeTodoWithRecurrence, createTodo, deleteTodo, subscribeToTodos, updateTodo, updateUserProfile } from '../utils/firebaseService';
 import { getDateString } from '../utils/dateUtils';
 import TimeWheelPicker from '../components/TimeWheelPicker';
+import { requestNotificationPermission, sendAppNotification, isNotificationSupported } from '../utils/notificationService';
 
 const previewTodos = [
   { id: 'pt1', text: 'Prepare tomorrow plan', completed: false, priority: 'high', category: 'work', recurrence: 'none', createdAtMs: Date.now() - 100000 },
@@ -68,7 +69,7 @@ function Todo({ user, userData, onProfileUpdated, isPreview = false }) {
       const mm = String(now.getMinutes()).padStart(2, '0');
       const current = `${hh}:${mm}`;
       const todayKey = getDateString(now);
-      const canNotify = typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted';
+      const canNotify = isNotificationSupported() && Notification.permission === 'granted';
 
       todos.forEach(async (item) => {
         if (!item || item.completed) return;
@@ -87,7 +88,7 @@ function Todo({ user, userData, onProfileUpdated, isPreview = false }) {
         if (dueDate === todayKey && reminderTime <= current && canNotify && !localStorage.getItem(notifyStamp)) {
           localStorage.setItem(notifyStamp, '1');
           try {
-            new Notification('HabytARC Task Reminder', {
+            await sendAppNotification('HabytARC Task Reminder', {
               body: item.text ? `Time for: ${item.text}` : 'You have a scheduled to-do reminder.',
               tag: `todo_item_${item.id}_${todayKey}`
             });
@@ -133,10 +134,8 @@ function Todo({ user, userData, onProfileUpdated, isPreview = false }) {
     setTodoReminderEnabled(nextValue);
 
     try {
-      if (typeof window !== 'undefined' && 'Notification' in window && nextValue) {
-        if (Notification.permission === 'default') {
-          await Notification.requestPermission();
-        }
+      if (nextValue) {
+        await requestNotificationPermission();
       }
 
       await updateUserProfile(user.uid, { todoReminderEnabled: nextValue });
@@ -158,25 +157,27 @@ function Todo({ user, userData, onProfileUpdated, isPreview = false }) {
       lockAction();
       return;
     }
-    if (typeof window === 'undefined' || !('Notification' in window)) {
+    if (!isNotificationSupported()) {
       setError('This browser does not support notifications.');
       return;
     }
 
     try {
       let permission = Notification.permission;
-      if (permission === 'default') {
-        permission = await Notification.requestPermission();
-      }
+      if (permission === 'default') permission = await requestNotificationPermission();
       if (permission !== 'granted') {
         setError('Notification permission is blocked. Allow notifications in your browser settings.');
         return;
       }
 
-      new Notification('HabytARC Test Notification', {
+      const result = await sendAppNotification('HabytARC Test Notification', {
         body: 'Notifications are working for this browser.',
         tag: `habytarc_test_${Date.now()}`
       });
+      if (!result.ok) {
+        setError('Notification delivery failed on this browser/device.');
+        return;
+      }
       setSuccess('Test notification sent.');
       setError('');
     } catch (error) {
@@ -215,8 +216,8 @@ function Todo({ user, userData, onProfileUpdated, isPreview = false }) {
         }
       }
 
-      if (reminderEnabled && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission().catch(() => {});
+      if (reminderEnabled && isNotificationSupported() && Notification.permission === 'default') {
+        requestNotificationPermission().catch(() => {});
       }
 
       const subtasks = String(newTodo.subtasksText || '')
