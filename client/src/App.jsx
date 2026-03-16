@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './config/firebase';
 import { createUserProfile, getUserProfile } from './utils/firebaseService';
+import { ensurePushRegistration, ensureForegroundPushListener } from './utils/pushClient';
+import { sendAppNotification } from './utils/notificationService';
 import './styles/App.css';
 
 import Login from './pages/Login';
@@ -16,6 +18,7 @@ import AIChat from './pages/AIChat';
 import Feedback from './pages/Feedback';
 import Todo from './pages/Todo';
 import Peek from './pages/Peek';
+import ExamMode from './pages/ExamMode';
 import Navigation from './components/Navigation';
 
 const THEME_OPTIONS = ['dark', 'light'];
@@ -72,6 +75,22 @@ function App() {
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+      ensurePushRegistration(user.uid).catch((error) => {
+        console.error('Push registration sync failed:', error);
+      });
+    }
+
+    ensureForegroundPushListener((payload) => {
+      const title = payload?.notification?.title || payload?.data?.title || 'HabytARC';
+      const body = payload?.notification?.body || payload?.data?.body || '';
+      sendAppNotification(title, { body, tag: payload?.data?.tag || `fcm_${Date.now()}` }).catch(() => {});
+    });
+  }, [user?.uid]);
 
   const refreshUserData = async () => {
     if (user) {
@@ -136,6 +155,10 @@ function App() {
           <Route 
             path="/stats" 
             element={user && userData ? <Stats user={user} userData={userData} /> : <Navigate to="/login" />} 
+          />
+          <Route
+            path="/exam-mode"
+            element={user && userData ? <ExamMode user={user} /> : <Navigate to="/login" />}
           />
           <Route 
             path="/habits" 

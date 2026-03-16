@@ -67,6 +67,45 @@ export const updateUserProfile = async (uid, data) => {
   await updateDoc(doc(db, 'users', uid), data);
 };
 
+export const savePushToken = async (uid, token, metadata = {}) => {
+  if (!uid || !token) {
+    throw new Error('Missing push token fields');
+  }
+
+  const ref = collection(db, 'users', uid, 'push_tokens');
+  const existingQuery = query(ref, where('token', '==', token), limit(1));
+  const snapshot = await getDocs(existingQuery);
+  const payload = {
+    token: String(token),
+    userId: uid,
+    userAgent: String(metadata?.userAgent || ''),
+    platform: String(metadata?.platform || ''),
+    timeZone: String(metadata?.timeZone || ''),
+    updatedAtMs: Date.now()
+  };
+
+  if (snapshot.empty) {
+    await addDoc(ref, {
+      ...payload,
+      createdAtMs: Date.now()
+    });
+    return;
+  }
+
+  await updateDoc(snapshot.docs[0].ref, payload);
+};
+
+export const removePushToken = async (uid, token) => {
+  if (!uid || !token) return;
+  const ref = collection(db, 'users', uid, 'push_tokens');
+  const existingQuery = query(ref, where('token', '==', token));
+  const snapshot = await getDocs(existingQuery);
+  if (snapshot.empty) return;
+  const batch = writeBatch(db);
+  snapshot.docs.forEach((item) => batch.delete(item.ref));
+  await batch.commit();
+};
+
 // Habit Services
 export const createHabit = async (uid, habitData) => {
   const habitRef = doc(collection(db, 'habits'));
@@ -503,4 +542,186 @@ export const clearAIChatHistory = async (uid) => {
   const batch = writeBatch(db);
   snapshot.docs.forEach((item) => batch.delete(item.ref));
   await batch.commit();
+};
+
+const sanitizeProgressCounter = (payload = {}) => ({
+  total: Math.max(0, Number(payload?.total || 0)),
+  solved: Math.max(0, Number(payload?.solved || 0))
+});
+
+const sanitizeUnitCounters = (items = []) =>
+  (Array.isArray(items) ? items : [])
+    .map((item, index) => ({
+      id: String(item?.id || `unit_counter_${Date.now()}_${index}_${Math.floor(Math.random() * 10000)}`),
+      unit: String(item?.unit || 'General').trim() || 'General',
+      total: Math.max(0, Number(item?.total || 0)),
+      solved: Math.max(0, Math.min(Number(item?.solved || 0), Number(item?.total || 0)))
+    }))
+    .filter((item) => item.unit);
+
+const sanitizeSyllabusItems = (items = []) =>
+  (Array.isArray(items) ? items : [])
+    .map((item, index) => ({
+      id: String(item?.id || `syllabus_${Date.now()}_${index}_${Math.floor(Math.random() * 10000)}`),
+      unit: String(item?.unit || 'General').trim() || 'General',
+      title: String(item?.title || '').trim(),
+      status: ['pending', 'completed', 'skipped'].includes(String(item?.status || '').toLowerCase())
+        ? String(item?.status).toLowerCase()
+        : 'pending',
+      source: String(item?.source || 'manual').toLowerCase()
+    }))
+    .filter((item) => item.title);
+
+const sanitizeMaterials = (items = []) =>
+  (Array.isArray(items) ? items : [])
+    .map((item, index) => ({
+      id: String(item?.id || `material_${Date.now()}_${index}_${Math.floor(Math.random() * 10000)}`),
+      title: String(item?.title || '').trim(),
+      type: String(item?.type || 'notes').toLowerCase(),
+      status: ['pending', 'completed', 'skipped'].includes(String(item?.status || '').toLowerCase())
+        ? String(item?.status).toLowerCase()
+        : 'pending',
+      link: String(item?.link || '').trim(),
+      youtubeLink: String(item?.youtubeLink || '').trim(),
+      description: String(item?.description || '').trim(),
+      syllabusItemIds: Array.isArray(item?.syllabusItemIds)
+        ? item.syllabusItemIds.map((value) => String(value)).filter(Boolean)
+        : [],
+      localFileId: String(item?.localFileId || '').trim(),
+      fileName: String(item?.fileName || '').trim(),
+      mimeType: String(item?.mimeType || '').trim(),
+      sizeBytes: Math.max(0, Number(item?.sizeBytes || 0)),
+      isLocalOnly: Boolean(item?.isLocalOnly),
+      createdAtMs: Number(item?.createdAtMs || Date.now())
+    }))
+    .filter((item) => item.title);
+
+const sanitizeSyllabusSources = (items = []) =>
+  (Array.isArray(items) ? items : [])
+    .map((item, index) => ({
+      id: String(item?.id || `syllabus_source_${Date.now()}_${index}_${Math.floor(Math.random() * 10000)}`),
+      title: String(item?.title || item?.fileName || 'Syllabus file').trim(),
+      localFileId: String(item?.localFileId || '').trim(),
+      fileName: String(item?.fileName || '').trim(),
+      mimeType: String(item?.mimeType || '').trim(),
+      sizeBytes: Math.max(0, Number(item?.sizeBytes || 0)),
+      isLocalOnly: Boolean(item?.isLocalOnly),
+      createdAtMs: Number(item?.createdAtMs || Date.now())
+    }))
+    .filter((item) => item.title);
+
+const sanitizeExamSubject = (uid, subjectData = {}) => ({
+  userId: uid,
+  name: String(subjectData?.name || '').trim(),
+  examName: String(subjectData?.examName || '').trim(),
+  syllabusItems: sanitizeSyllabusItems(subjectData?.syllabusItems),
+  syllabusSources: sanitizeSyllabusSources(subjectData?.syllabusSources),
+  materials: sanitizeMaterials(subjectData?.materials),
+  questionBank: sanitizeProgressCounter(subjectData?.questionBank),
+  previousYear: sanitizeProgressCounter(subjectData?.previousYear),
+  questionBankByUnit: sanitizeUnitCounters(subjectData?.questionBankByUnit),
+  previousYearByUnit: sanitizeUnitCounters(subjectData?.previousYearByUnit),
+  createdAt: String(subjectData?.createdAt || new Date().toISOString()),
+  createdAtMs: Number(subjectData?.createdAtMs || Date.now()),
+  updatedAt: new Date().toISOString(),
+  updatedAtMs: Date.now()
+});
+
+export const createExamSubject = async (uid, subjectData) => {
+  if (!uid) {
+    throw new Error('Missing user ID');
+  }
+
+  const subjectId = String(subjectData?.id || `exam_${Date.now()}_${Math.floor(Math.random() * 100000)}`);
+  const payload = {
+    id: subjectId,
+    ...sanitizeExamSubject(uid, subjectData)
+  };
+  if (!payload.name) {
+    throw new Error('Subject name is required');
+  }
+
+  const userRef = doc(db, 'users', uid);
+  const userSnap = await getDoc(userRef);
+  if (!userSnap.exists()) {
+    throw new Error('User profile not found');
+  }
+
+  const current = userSnap.data() || {};
+  const existing = Array.isArray(current.examSubjects) ? current.examSubjects : [];
+  await updateDoc(userRef, {
+    examSubjects: [...existing, payload]
+  });
+
+  return subjectId;
+};
+
+export const updateExamSubject = async (uid, subjectId, updates = {}) => {
+  if (!uid || !subjectId) {
+    throw new Error('Missing exam subject update fields');
+  }
+
+  const userRef = doc(db, 'users', uid);
+  const userSnap = await getDoc(userRef);
+  if (!userSnap.exists()) {
+    throw new Error('User profile not found');
+  }
+
+  const profile = userSnap.data() || {};
+  const existing = Array.isArray(profile.examSubjects) ? profile.examSubjects : [];
+  const current = existing.find((item) => item?.id === subjectId);
+  if (!current) {
+    throw new Error('Exam subject not found');
+  }
+
+  const merged = sanitizeExamSubject(uid, {
+    ...current,
+    ...updates,
+    createdAt: current.createdAt,
+    createdAtMs: current.createdAtMs
+  });
+  const nextItems = existing.map((item) => (item?.id === subjectId ? { id: subjectId, ...merged } : item));
+  await updateDoc(userRef, { examSubjects: nextItems });
+};
+
+export const deleteExamSubject = async (uid, subjectId) => {
+  if (!uid || !subjectId) {
+    throw new Error('Missing exam subject delete fields');
+  }
+
+  const userRef = doc(db, 'users', uid);
+  const userSnap = await getDoc(userRef);
+  if (!userSnap.exists()) {
+    throw new Error('User profile not found');
+  }
+
+  const profile = userSnap.data() || {};
+  const existing = Array.isArray(profile.examSubjects) ? profile.examSubjects : [];
+  await updateDoc(userRef, {
+    examSubjects: existing.filter((item) => item?.id !== subjectId)
+  });
+};
+
+export const subscribeToExamSubjects = (uid, callback) => {
+  if (!uid) {
+    callback([]);
+    return () => {};
+  }
+
+  const userRef = doc(db, 'users', uid);
+  return onSnapshot(
+    userRef,
+    (snapshot) => {
+      const profile = snapshot.exists() ? (snapshot.data() || {}) : {};
+      const items = (Array.isArray(profile.examSubjects) ? profile.examSubjects : [])
+        .map((item) => ({ ...item, id: String(item?.id || '') }))
+        .filter((item) => item.id)
+        .sort((a, b) => Number(a.createdAtMs || 0) - Number(b.createdAtMs || 0));
+      callback(items);
+    },
+    (error) => {
+      console.error('subscribeToExamSubjects failed:', error);
+      callback([]);
+    }
+  );
 };

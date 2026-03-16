@@ -58,10 +58,29 @@ Frontend default URL: `http://localhost:5173`
 
 1. Create `.env` from `.env.example`
 2. Set provider and keys
+3. Keep only one `AI_PROVIDER` line in `.env`
+4. Restart the backend after changing `.env`
 3. Run:
 
 ```bash
 npm run dev:api
+```
+
+## Push Notifications (FCM)
+
+For reliable reminders after deployment (including background/closed-tab), configure:
+
+1. `VITE_FIREBASE_VAPID_KEY` in frontend env.
+2. Backend env in `.env`:
+   - `PUSH_CRON_SECRET`
+   - `FIREBASE_PROJECT_ID`
+   - `FIREBASE_CLIENT_EMAIL`
+   - `FIREBASE_PRIVATE_KEY` (with `\n` escaped line breaks)
+3. Deploy API server and trigger this endpoint every minute via cron:
+
+```text
+POST /api/push/run-due-reminders
+Header: X-Cron-Secret: <PUSH_CRON_SECRET>
 ```
 
 ## Scripts

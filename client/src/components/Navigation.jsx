@@ -44,6 +44,9 @@ function Navigation({ theme, onToggleTheme, basePath = '' }) {
             <NavLink to={resolvePath('/stats')} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <span className="nav-text">Stats</span>
             </NavLink>
+            <NavLink to={resolvePath('/exam-mode')} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <span className="nav-text">Exam Mode</span>
+            </NavLink>
             <NavLink to={resolvePath('/habits')} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <span className="nav-text">Habits</span>
             </NavLink>

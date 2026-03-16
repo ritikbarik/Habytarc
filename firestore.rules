@@ -28,7 +28,15 @@ service cloud.firestore {
         allow read, create, update, delete: if isOwner(uid);
       }
 
+      match /exam_subjects/{subjectId} {
+        allow read, create, update, delete: if isOwner(uid);
+      }
+
       match /feedback/{feedbackId} {
+        allow read, create, update, delete: if isOwner(uid);
+      }
+
+      match /push_tokens/{tokenId} {
         allow read, create, update, delete: if isOwner(uid);
       }
     }

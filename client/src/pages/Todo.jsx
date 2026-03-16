@@ -3,6 +3,7 @@ import { completeTodoWithRecurrence, createTodo, deleteTodo, subscribeToTodos, u
 import { getDateString } from '../utils/dateUtils';
 import TimeWheelPicker from '../components/TimeWheelPicker';
 import { requestNotificationPermission, sendAppNotification, isNotificationSupported } from '../utils/notificationService';
+import { ensurePushRegistration } from '../utils/pushClient';
 
 const previewTodos = [
   { id: 'pt1', text: 'Prepare tomorrow plan', completed: false, priority: 'high', category: 'work', recurrence: 'none', createdAtMs: Date.now() - 100000 },
@@ -135,6 +136,10 @@ function Todo({ user, userData, onProfileUpdated, isPreview = false }) {
 
     try {
       if (nextValue) {
+        const pushResult = await ensurePushRegistration(user.uid);
+        if (!pushResult.ok && pushResult.reason === 'missing_vapid_key') {
+          throw new Error('Missing VITE_FIREBASE_VAPID_KEY for push notifications.');
+        }
         await requestNotificationPermission();
       }
 
@@ -167,6 +172,12 @@ function Todo({ user, userData, onProfileUpdated, isPreview = false }) {
       if (permission === 'default') permission = await requestNotificationPermission();
       if (permission !== 'granted') {
         setError('Notification permission is blocked. Allow notifications in your browser settings.');
+        return;
+      }
+
+      const pushResult = await ensurePushRegistration(user.uid);
+      if (!pushResult.ok && pushResult.reason === 'missing_vapid_key') {
+        setError('Push setup missing: configure VITE_FIREBASE_VAPID_KEY and redeploy.');
         return;
       }
 
@@ -218,6 +229,12 @@ function Todo({ user, userData, onProfileUpdated, isPreview = false }) {
 
       if (reminderEnabled && isNotificationSupported() && Notification.permission === 'default') {
         requestNotificationPermission().catch(() => {});
+      }
+      if (reminderEnabled) {
+        const pushResult = await ensurePushRegistration(user.uid);
+        if (!pushResult.ok && pushResult.reason === 'missing_vapid_key') {
+          throw new Error('Push setup missing: configure VITE_FIREBASE_VAPID_KEY.');
+        }
       }
 
       const subtasks = String(newTodo.subtasksText || '')

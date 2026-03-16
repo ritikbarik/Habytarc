@@ -67,7 +67,7 @@ function Login() {
           <span> Track Habits Without Noise</span>
         </h1>
         <p className="auth-landing-subtitle">
-          HabytARC helps you run habits and to-dos in one flow with clean tracking, cheat-day aware streaks, and practical daily insights.
+          HabytARC brings habits, to-dos, exam mode, and AI-assisted study planning into one clean workspace with practical daily insights.
         </p>
 
         <div className="auth-hero-actions">
@@ -96,8 +96,8 @@ function Login() {
           </article>
           <article className="auth-landing-card">
             <span className="auth-card-label">Learn</span>
-            <h3>Calendar + Insights</h3>
-            <p>Use calendar history and performance trends to quickly spot consistency patterns.</p>
+            <h3>Exam Mode</h3>
+            <p>Organize subjects, extract syllabus with AI, group units cleanly, and open study materials in one place.</p>
           </article>
           <article className="auth-landing-card">
             <span className="auth-card-label">Connect</span>
