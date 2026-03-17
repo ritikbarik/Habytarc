@@ -3,9 +3,34 @@ import { clearAIChatHistory, createHabit, deleteHabit, getAIChatHistory, getPend
 import { getDateString } from '../utils/dateUtils';
 
 const AI_API_BASE_URL = String(import.meta.env.VITE_AI_API_BASE_URL || '').trim();
-const CHAT_ENDPOINT = AI_API_BASE_URL
-  ? `${AI_API_BASE_URL.replace(/\/+$/, '')}/api/chat`
-  : '/api/chat';
+const resolveApiBaseUrl = () => {
+  if (!AI_API_BASE_URL) return '';
+
+  try {
+    const configuredUrl = new URL(AI_API_BASE_URL);
+    const browserHost = typeof window !== 'undefined' ? window.location.hostname : '';
+    const configuredHost = configuredUrl.hostname;
+    const configuredIsLocalhost =
+      configuredHost === 'localhost' ||
+      configuredHost === '127.0.0.1' ||
+      configuredHost === '::1';
+    const browserIsLocalhost =
+      browserHost === 'localhost' ||
+      browserHost === '127.0.0.1' ||
+      browserHost === '::1';
+
+    if (configuredIsLocalhost && browserHost && !browserIsLocalhost) {
+      return '';
+    }
+
+    return AI_API_BASE_URL.replace(/\/+$/, '');
+  } catch {
+    return AI_API_BASE_URL.replace(/\/+$/, '');
+  }
+};
+
+const API_BASE_URL = resolveApiBaseUrl();
+const CHAT_ENDPOINT = API_BASE_URL ? `${API_BASE_URL}/api/chat` : '/api/chat';
 
 function AIChat({ user, userData, isPreview = false }) {
   const defaultAssistantMessage = {
@@ -288,7 +313,7 @@ function AIChat({ user, userData, isPreview = false }) {
       console.error('AI request error:', error);
       const failureMessage = {
         role: 'assistant',
-        text: `HabytARC AI error: ${error?.message || 'Service unavailable'}`
+        text: `HabytARC AI error: ${error?.message || 'Gemini service unavailable'}`
       };
       appendMessage(failureMessage);
       await saveHistoryIfEnabled(userMessage, failureMessage);

@@ -5,11 +5,39 @@ import {
   subscribeToExamSubjects,
   updateExamSubject
 } from '../utils/firebaseService';
+import { deleteCloudFile } from '../utils/cloudFileStorage';
 import { deleteLocalFile, getLocalFileEntry, getLocalFileUrl, saveLocalFile } from '../utils/localFileVault';
 
 const AI_API_BASE_URL = String(import.meta.env.VITE_AI_API_BASE_URL || '').trim();
-const SYLLABUS_ENDPOINT = AI_API_BASE_URL
-  ? `${AI_API_BASE_URL.replace(/\/+$/, '')}/api/exam-syllabus`
+const resolveApiBaseUrl = () => {
+  if (!AI_API_BASE_URL) return '';
+
+  try {
+    const configuredUrl = new URL(AI_API_BASE_URL);
+    const browserHost = typeof window !== 'undefined' ? window.location.hostname : '';
+    const configuredHost = configuredUrl.hostname;
+    const configuredIsLocalhost =
+      configuredHost === 'localhost' ||
+      configuredHost === '127.0.0.1' ||
+      configuredHost === '::1';
+    const browserIsLocalhost =
+      browserHost === 'localhost' ||
+      browserHost === '127.0.0.1' ||
+      browserHost === '::1';
+
+    if (configuredIsLocalhost && browserHost && !browserIsLocalhost) {
+      return '';
+    }
+
+    return AI_API_BASE_URL.replace(/\/+$/, '');
+  } catch {
+    return AI_API_BASE_URL.replace(/\/+$/, '');
+  }
+};
+
+const API_BASE_URL = resolveApiBaseUrl();
+const SYLLABUS_ENDPOINT = API_BASE_URL
+  ? `${API_BASE_URL}/api/exam-syllabus`
   : '/api/exam-syllabus';
 
 const emptySubjectDraft = {
@@ -359,6 +387,8 @@ function ExamMode({ user }) {
         syllabusSource = {
           id: makeId('syllabus_source'),
           title: subjectSourceFile.name || 'Syllabus file',
+          link: '',
+          storagePath: '',
           localFileId: localMeta.id,
           fileName: localMeta.name,
           mimeType: localMeta.type,
@@ -516,6 +546,8 @@ function ExamMode({ user }) {
         {
           id: makeId('syllabus_source'),
           title: file.name || 'Syllabus file',
+          link: '',
+          storagePath: '',
           localFileId: localMeta.id,
           fileName: localMeta.name,
           mimeType: localMeta.type,
@@ -534,6 +566,9 @@ function ExamMode({ user }) {
   const removeSyllabusSource = async (sourceId) => {
     if (!activeSubject) return;
     const source = (activeSubject.syllabusSources || []).find((item) => item.id === sourceId);
+    if (source?.storagePath) {
+      await deleteCloudFile(source.storagePath).catch(() => {});
+    }
     if (source?.localFileId) {
       await deleteLocalFile(source.localFileId).catch(() => {});
     }
@@ -567,6 +602,7 @@ function ExamMode({ user }) {
           syllabusItemIds: materialDraft.selectedSyllabusIds,
           status: 'pending',
           localFileId: localMeta?.id || '',
+          storagePath: '',
           fileName: localMeta?.name || '',
           mimeType: localMeta?.type || '',
           sizeBytes: localMeta?.size || 0,
@@ -594,6 +630,9 @@ function ExamMode({ user }) {
   const removeMaterial = async (materialId) => {
     if (!activeSubject) return;
     const material = (activeSubject.materials || []).find((item) => item.id === materialId);
+    if (material?.storagePath) {
+      await deleteCloudFile(material.storagePath).catch(() => {});
+    }
     if (material?.localFileId) {
       await deleteLocalFile(material.localFileId).catch(() => {});
     }
@@ -662,7 +701,9 @@ function ExamMode({ user }) {
     if (!window.confirm(`Delete ${subject.name}?`)) return;
     try {
       await Promise.all([
+        ...(subject.materials || []).map((item) => item?.storagePath ? deleteCloudFile(item.storagePath).catch(() => {}) : Promise.resolve()),
         ...(subject.materials || []).map((item) => item?.localFileId ? deleteLocalFile(item.localFileId).catch(() => {}) : Promise.resolve()),
+        ...(subject.syllabusSources || []).map((item) => item?.storagePath ? deleteCloudFile(item.storagePath).catch(() => {}) : Promise.resolve()),
         ...(subject.syllabusSources || []).map((item) => item?.localFileId ? deleteLocalFile(item.localFileId).catch(() => {}) : Promise.resolve())
       ]);
       await deleteExamSubject(user.uid, subject.id);
@@ -889,6 +930,7 @@ function ExamMode({ user }) {
                                 <div className="exam-meta-row">
                                   <span className="badge">{source.mimeType?.startsWith('image/') ? 'Image' : source.mimeType === 'application/pdf' ? 'PDF' : 'File'}</span>
                                   {source.fileName ? <span className="badge">{source.fileName} • {formatBytes(source.sizeBytes)}</span> : null}
+                                  {source.storagePath ? <span className="badge">Cloud file</span> : null}
                                 </div>
                               </div>
                               <div className="exam-actions">
@@ -1097,6 +1139,7 @@ function ExamMode({ user }) {
                                           <span key={`${material.id}_${unit}`} className="badge">{unit}</span>
                                         ))}
                                         {material.fileName ? <span className="badge">{material.fileName} • {formatBytes(material.sizeBytes)}</span> : null}
+                                        {material.storagePath ? <span className="badge">Cloud file</span> : null}
                                         {material.isLocalOnly ? <span className="badge">Local browser file</span> : null}
                                       </div>
                                       {material.description ? <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)' }}>{material.description}</p> : null}
@@ -1265,14 +1308,14 @@ function ExamMode({ user }) {
                 {previewKind === 'youtube' && youtubeEmbedUrl ? (
                   <iframe title={previewTarget.title} src={youtubeEmbedUrl} className="exam-preview-frame" allowFullScreen />
                 ) : null}
-                {previewKind === 'image' && previewUrl ? (
-                  <img src={previewUrl} alt={previewTarget.title} className="exam-preview-image" />
+                {previewKind === 'image' && (previewUrl || previewTarget.link) ? (
+                  <img src={previewUrl || previewTarget.link} alt={previewTarget.title} className="exam-preview-image" />
                 ) : null}
                 {previewKind === 'pdf' && (previewUrl || previewTarget.link) ? (
                   <iframe title={previewTarget.title} src={previewUrl || previewTarget.link} className="exam-preview-frame" />
                 ) : null}
-                {previewKind === 'text' && previewUrl ? (
-                  <iframe title={previewTarget.title} src={previewUrl} className="exam-preview-frame" />
+                {previewKind === 'text' && (previewUrl || previewTarget.link) ? (
+                  <iframe title={previewTarget.title} src={previewUrl || previewTarget.link} className="exam-preview-frame" />
                 ) : null}
                 {previewKind === 'office' && officePreviewUrl ? (
                   <iframe title={previewTarget.title} src={officePreviewUrl} className="exam-preview-frame" />

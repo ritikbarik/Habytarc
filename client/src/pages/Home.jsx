@@ -14,8 +14,8 @@ import {
   resolvePendingTask
 } from '../utils/firebaseService';
 import { isCheatDay, getDateAfterDays, getDateString, getNextWeekdayDate, getTodayProgress, getHabitStreakMap } from '../utils/dateUtils';
-import { fetchWeatherSnapshot, isSevereWeatherCode } from '../utils/weatherService';
-import { requestNotificationPermission, sendAppNotification, isNotificationSupported } from '../utils/notificationService';
+import { getWeatherFallbackSnapshot, isSevereWeatherCode } from '../utils/weatherService';
+import { sendAppNotification, isNotificationSupported } from '../utils/notificationService';
 
 const refreshQuotes = [
   'You do not rise to the level of your goals. You fall to the level of your systems.',
@@ -119,15 +119,7 @@ function Home({ user, userData, isPreview = false }) {
   const [weatherInfo, setWeatherInfo] = useState({
     loading: false,
     error: '',
-    cityLabel: '',
-    timezone: '',
-    currentTimeIso: '',
-    temperatureC: NaN,
-    apparentTemperatureC: NaN,
-    precipitationMm: NaN,
-    windSpeedKmh: NaN,
-    weatherCode: -1,
-    weatherLabel: ''
+    ...getWeatherFallbackSnapshot()
   });
   const [clockNow, setClockNow] = useState(() => new Date());
 
@@ -142,33 +134,12 @@ function Home({ user, userData, isPreview = false }) {
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    const runFetch = async () => {
-      setWeatherInfo((prev) => ({ ...prev, loading: true, error: '' }));
-      try {
-        const snapshot = await fetchWeatherSnapshot();
-        if (!mounted) return;
-        setWeatherInfo({
-          loading: false,
-          error: '',
-          ...snapshot
-        });
-      } catch (error) {
-        if (!mounted) return;
-        setWeatherInfo((prev) => ({
-          ...prev,
-          loading: false,
-          error: 'Weather unavailable. Enable location access to see live weather.'
-        }));
-      }
-    };
-
-    runFetch();
-    const intervalId = setInterval(runFetch, 15 * 60 * 1000);
-    return () => {
-      mounted = false;
-      clearInterval(intervalId);
-    };
+    setWeatherInfo((prev) => ({
+      ...prev,
+      ...getWeatherFallbackSnapshot(),
+      loading: false,
+      error: ''
+    }));
   }, []);
 
   useEffect(() => {
@@ -214,13 +185,6 @@ function Home({ user, userData, isPreview = false }) {
     if (Notification.permission === 'granted') {
       notify();
       return;
-    }
-    if (Notification.permission === 'default') {
-      requestNotificationPermission()
-        .then((permission) => {
-          if (permission === 'granted') notify();
-        })
-        .catch(() => {});
     }
   }, [weatherInfo.currentTimeIso, weatherInfo.weatherCode, weatherInfo.weatherLabel, weatherInfo.cityLabel]);
 
@@ -288,12 +252,9 @@ function Home({ user, userData, isPreview = false }) {
   useEffect(() => {
     if (isPreview) return;
     if (!isNotificationSupported()) return;
-    if (Notification.permission === 'default' && habits.some((habit) => Boolean(habit.reminderEnabled && habit.reminderTime))) {
-      requestNotificationPermission().catch(() => {});
-    }
     if (!Array.isArray(habits) || habits.length === 0) return;
 
-    const timer = setInterval(() => {
+    const runReminderCheck = () => {
       if (Notification.permission !== 'granted') return;
       const now = new Date();
       const hh = String(now.getHours()).padStart(2, '0');
@@ -303,7 +264,7 @@ function Home({ user, userData, isPreview = false }) {
 
       habits.forEach((habit) => {
         const reminderTime = String(habit.reminderTime || '');
-        if (!habit.reminderEnabled || !reminderTime || reminderTime !== current) return;
+        if (!habit.reminderEnabled || !reminderTime || reminderTime > current) return;
         const stampKey = `habytarc_reminder_${user?.uid}_${habit.id}_${dayKey}`;
         if (localStorage.getItem(stampKey)) return;
         localStorage.setItem(stampKey, '1');
@@ -316,7 +277,10 @@ function Home({ user, userData, isPreview = false }) {
           console.error('Reminder notification failed:', error);
         }
       });
-    }, 60 * 1000);
+    };
+
+    runReminderCheck();
+    const timer = setInterval(runReminderCheck, 30 * 1000);
 
     return () => clearInterval(timer);
   }, [habits, isPreview, user?.uid]);
@@ -358,13 +322,9 @@ function Home({ user, userData, isPreview = false }) {
       sendDigest();
       return;
     }
-    if (Notification.permission === 'default') {
-      requestNotificationPermission()
-        .then((permission) => {
-          if (permission === 'granted') sendDigest();
-        })
-        .catch(() => {});
-    }
+    if (Notification.permission !== 'granted') return;
+
+    sendDigest();
   }, [isPreview, todos, user?.uid, userData?.todoReminderEnabled]);
 
   useEffect(() => {
@@ -380,10 +340,6 @@ function Home({ user, userData, isPreview = false }) {
     });
     if (reminderItems.length === 0) return;
 
-    if (Notification.permission === 'default') {
-      requestNotificationPermission().catch(() => {});
-    }
-
     const disableReminder = async (todoItem, dayKey) => {
       const offStamp = `habytarc_todo_item_reminder_off_${user?.uid}_${todoItem.id}_${dayKey}`;
       if (localStorage.getItem(offStamp)) return;
@@ -395,7 +351,7 @@ function Home({ user, userData, isPreview = false }) {
       }
     };
 
-    const timer = setInterval(() => {
+    const processTodoReminders = () => {
       const now = new Date();
       const hh = String(now.getHours()).padStart(2, '0');
       const mm = String(now.getMinutes()).padStart(2, '0');
@@ -423,7 +379,10 @@ function Home({ user, userData, isPreview = false }) {
 
         await disableReminder(todoItem, dayKey);
       });
-    }, 60 * 1000);
+    };
+
+    processTodoReminders();
+    const timer = setInterval(processTodoReminders, 30 * 1000);
 
     return () => clearInterval(timer);
   }, [isPreview, todos, user?.uid, userData?.todoReminderEnabled]);

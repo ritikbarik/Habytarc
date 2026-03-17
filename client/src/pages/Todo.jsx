@@ -175,12 +175,6 @@ function Todo({ user, userData, onProfileUpdated, isPreview = false }) {
         return;
       }
 
-      const pushResult = await ensurePushRegistration(user.uid);
-      if (!pushResult.ok && pushResult.reason === 'missing_vapid_key') {
-        setError('Push setup missing: configure VITE_FIREBASE_VAPID_KEY and redeploy.');
-        return;
-      }
-
       const result = await sendAppNotification('HabytARC Test Notification', {
         body: 'Notifications are working for this browser.',
         tag: `habytarc_test_${Date.now()}`

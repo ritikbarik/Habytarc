@@ -31,6 +31,14 @@ const WEATHER_TEXT = {
 
 const WEATHER_ALERT_CODES = new Set([65, 67, 75, 82, 86, 95, 96, 99]);
 
+const getBrowserTimeZone = () => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  } catch (_) {
+    return '';
+  }
+};
+
 const getPosition = () =>
   new Promise((resolve, reject) => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
@@ -47,6 +55,19 @@ const getPosition = () =>
 export const getWeatherLabel = (code) => WEATHER_TEXT[Number(code)] || 'Unknown weather';
 
 export const isSevereWeatherCode = (code) => WEATHER_ALERT_CODES.has(Number(code));
+
+export const getWeatherFallbackSnapshot = () => ({
+  cityLabel: '',
+  timezone: getBrowserTimeZone(),
+  currentTimeIso: new Date().toISOString(),
+  temperatureC: NaN,
+  apparentTemperatureC: NaN,
+  precipitationMm: NaN,
+  windSpeedKmh: NaN,
+  weatherCode: -1,
+  weatherLabel: '',
+  isDay: true
+});
 
 export const fetchWeatherSnapshot = async () => {
   const position = await getPosition();

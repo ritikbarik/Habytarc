@@ -588,6 +588,7 @@ const sanitizeMaterials = (items = []) =>
         ? item.syllabusItemIds.map((value) => String(value)).filter(Boolean)
         : [],
       localFileId: String(item?.localFileId || '').trim(),
+      storagePath: String(item?.storagePath || '').trim(),
       fileName: String(item?.fileName || '').trim(),
       mimeType: String(item?.mimeType || '').trim(),
       sizeBytes: Math.max(0, Number(item?.sizeBytes || 0)),
@@ -602,6 +603,8 @@ const sanitizeSyllabusSources = (items = []) =>
       id: String(item?.id || `syllabus_source_${Date.now()}_${index}_${Math.floor(Math.random() * 10000)}`),
       title: String(item?.title || item?.fileName || 'Syllabus file').trim(),
       localFileId: String(item?.localFileId || '').trim(),
+      storagePath: String(item?.storagePath || '').trim(),
+      link: String(item?.link || '').trim(),
       fileName: String(item?.fileName || '').trim(),
       mimeType: String(item?.mimeType || '').trim(),
       sizeBytes: Math.max(0, Number(item?.sizeBytes || 0)),

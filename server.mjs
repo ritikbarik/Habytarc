@@ -32,7 +32,7 @@ const loadDotEnv = () => {
 loadDotEnv();
 
 const PORT = Number(process.env.AI_API_PORT || 8787);
-const AI_PROVIDER = (process.env.AI_PROVIDER || 'openai').toLowerCase();
+const AI_PROVIDER = 'gemini';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -148,6 +148,65 @@ const extractPdfTextFromDataUrl = async (value = '') => {
   } finally {
     await parser.destroy().catch(() => {});
   }
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isGeminiTransientError = (status, message = '', code = '') => {
+  const normalizedMessage = String(message || '').toLowerCase();
+  const normalizedCode = String(code || '').toLowerCase();
+
+  return (
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    normalizedCode.includes('resource_exhausted') ||
+    normalizedCode.includes('unavailable') ||
+    normalizedMessage.includes('high demand') ||
+    normalizedMessage.includes('rate limit') ||
+    normalizedMessage.includes('quota') ||
+    normalizedMessage.includes('resource exhausted') ||
+    normalizedMessage.includes('temporarily unavailable') ||
+    normalizedMessage.includes('try again later')
+  );
+};
+
+const fetchGeminiGenerateContent = async (modelName, payload, fallbackLabel) => {
+  const retryDelaysMs = [400, 1200];
+  let lastError = { ok: false, status: 500, error: fallbackLabel, code: null };
+
+  for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      }
+    );
+
+    if (response.ok) {
+      const data = await response.json();
+      return { ok: true, data };
+    }
+
+    const errorText = await response.text();
+    const { message, code } = parseErrorMessage(errorText, fallbackLabel);
+    lastError = { ok: false, status: response.status, error: message, code };
+
+    const shouldRetry = isGeminiTransientError(response.status, message, code) && attempt < retryDelaysMs.length;
+    if (!shouldRetry) {
+      return lastError;
+    }
+
+    await sleep(retryDelaysMs[attempt]);
+  }
+
+  return lastError;
 };
 
 const buildSyllabusPrompt = ({ manualText, fileKind }) => [
@@ -462,41 +521,33 @@ const callGemini = async ({ context, recentHistory, userMessage, systemPrompt })
   let lastError = { ok: false, status: 500, error: 'Gemini request failed', code: null };
 
   for (const modelName of modelsToTry) {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+    const result = await fetchGeminiGenerateContent(
+      modelName,
       {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
+        systemInstruction: {
+          parts: [{ text: systemPrompt || buildSystemPrompt(context) }]
         },
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: systemPrompt || buildSystemPrompt(context) }]
-          },
-          contents: toGeminiContents([
-            ...recentHistory,
-            { role: 'user', content: userMessage }
-          ]),
-          generationConfig: {
-            temperature: 0.7
-          }
-        })
-      }
+        contents: toGeminiContents([
+          ...recentHistory,
+          { role: 'user', content: userMessage }
+        ]),
+        generationConfig: {
+          temperature: 0.7
+        }
+      },
+      'Gemini request failed'
     );
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      const { message, code } = parseErrorMessage(errorText, 'Gemini request failed');
-      lastError = { ok: false, status: response.status, error: message, code };
-
-      const modelMissing = String(message).toLowerCase().includes('not found');
-      if (modelMissing) {
-        continue;
-      }
+    if (!result.ok) {
+      lastError = result;
+      const normalizedMessage = String(result.error || '').toLowerCase();
+      const modelMissing = normalizedMessage.includes('not found');
+      const transient = isGeminiTransientError(result.status, result.error, result.code);
+      if (modelMissing || transient) continue;
       return lastError;
     }
 
-    const data = await response.json();
+    const data = result.data;
     const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
     if (!reply) {
       return { ok: false, status: 502, error: 'No reply from Gemini model', code: null };
@@ -527,35 +578,31 @@ const callGeminiSyllabus = async ({ manualText, fileDataUrl, fileKind }) => {
       });
     }
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+    const result = await fetchGeminiGenerateContent(
+      modelName,
       {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
+        systemInstruction: {
+          parts: [{ text: 'You convert syllabus text, images, or PDFs into structured exam topics.' }]
         },
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: 'You convert syllabus text, images, or PDFs into structured exam topics.' }]
-          },
-          contents: [{ role: 'user', parts }],
-          generationConfig: {
-            temperature: 0.2,
-            responseMimeType: 'application/json'
-          }
-        })
-      }
+        contents: [{ role: 'user', parts }],
+        generationConfig: {
+          temperature: 0.2,
+          responseMimeType: 'application/json'
+        }
+      },
+      'Gemini syllabus request failed'
     );
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      const { message, code } = parseErrorMessage(errorText, 'Gemini syllabus request failed');
-      lastError = { ok: false, status: response.status, error: message, code };
-      if (String(message).toLowerCase().includes('not found')) continue;
+    if (!result.ok) {
+      lastError = result;
+      const normalizedMessage = String(result.error || '').toLowerCase();
+      const modelMissing = normalizedMessage.includes('not found');
+      const transient = isGeminiTransientError(result.status, result.error, result.code);
+      if (modelMissing || transient) continue;
       return lastError;
     }
 
-    const data = await response.json();
+    const data = result.data;
     const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
     if (!reply) {
       return { ok: false, status: 502, error: 'No reply from Gemini model', code: null };
@@ -727,11 +774,6 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (reqUrl.pathname === '/api/exam-syllabus' && req.method === 'POST') {
-    if (!['openai', 'gemini', 'ollama', 'cloudflare'].includes(AI_PROVIDER)) {
-      sendJson(res, 500, { error: `Unsupported AI_PROVIDER: ${AI_PROVIDER}` });
-      return;
-    }
-
     try {
       const body = await parseBody(req);
       let manualText = String(body?.manualText || '').trim();
@@ -759,24 +801,11 @@ const server = http.createServer(async (req, res) => {
         providerFileKind = '';
       }
 
-      if ((AI_PROVIDER === 'ollama' || AI_PROVIDER === 'cloudflare') && providerFileDataUrl) {
-        sendJson(res, 400, {
-          error: `${AI_PROVIDER} syllabus extraction from uploaded files is not available. Paste the syllabus text instead.`
-        });
-        return;
-      }
-
-      const providerResult =
-        AI_PROVIDER === 'gemini'
-          ? await callGeminiSyllabus({ manualText, fileDataUrl: providerFileDataUrl, fileKind: providerFileKind })
-          : AI_PROVIDER === 'openai'
-            ? await callOpenAISyllabus({ manualText, fileDataUrl: providerFileDataUrl, fileKind: providerFileKind })
-          : await callOpenAI({
-              context: {},
-              recentHistory: [],
-              userMessage: buildSyllabusPrompt({ manualText, fileKind: '' }),
-              systemPrompt: 'You convert syllabus text into strict JSON: {"units":[{"title":"Unit 1","topics":["Topic 1"]}]}. Keep real unit and chapter names separate.'
-            });
+      const providerResult = await callGeminiSyllabus({
+        manualText,
+        fileDataUrl: providerFileDataUrl,
+        fileKind: providerFileKind
+      });
 
       if (!providerResult.ok) {
         sendJson(res, providerResult.status || 500, {
@@ -796,11 +825,6 @@ const server = http.createServer(async (req, res) => {
 
   if (reqUrl.pathname !== '/api/chat' || req.method !== 'POST') {
     sendJson(res, 404, { error: 'Not found' });
-    return;
-  }
-
-  if (!['openai', 'gemini', 'ollama', 'cloudflare'].includes(AI_PROVIDER)) {
-    sendJson(res, 500, { error: `Unsupported AI_PROVIDER: ${AI_PROVIDER}` });
     return;
   }
 
@@ -824,14 +848,7 @@ const server = http.createServer(async (req, res) => {
       }))
       .filter((msg) => msg.content.trim().length > 0);
 
-    const providerResult =
-      AI_PROVIDER === 'gemini'
-        ? await callGemini({ context, recentHistory, userMessage, systemPrompt })
-        : AI_PROVIDER === 'cloudflare'
-          ? await callCloudflare({ context, recentHistory, userMessage, systemPrompt })
-        : AI_PROVIDER === 'ollama'
-          ? await callOllama({ context, recentHistory, userMessage, systemPrompt })
-          : await callOpenAI({ context, recentHistory, userMessage, systemPrompt });
+    const providerResult = await callGemini({ context, recentHistory, userMessage, systemPrompt });
 
     if (!providerResult.ok) {
       sendJson(res, providerResult.status || 500, {
