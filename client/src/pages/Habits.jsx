@@ -4,14 +4,15 @@ import { getHabitStreakMap } from '../utils/dateUtils';
 import TimeWheelPicker from '../components/TimeWheelPicker';
 
 const previewHabits = [
-  { id: 'p1', name: 'Morning Walk', category: 'Health', icon: '🚶', enabled: true, reminderEnabled: true, reminderTime: '07:30' },
-  { id: 'p2', name: 'Deep Work Sprint', category: 'Work', icon: '💻', enabled: true },
-  { id: 'p3', name: 'Read 20 mins', category: 'Learning', icon: '📚', enabled: true }
+  { id: 'p1', name: 'Morning Walk', category: 'Health', icon: '🚶', enabled: true, reminderEnabled: true, reminderTime: '07:30', microAction: 'Walk for 5 minutes', adaptiveMode: true, targetMinutes: 20 },
+  { id: 'p2', name: 'Deep Work Sprint', category: 'Work', icon: '💻', enabled: true, microAction: 'Focus for 10 minutes', adaptiveMode: true, targetMinutes: 45 },
+  { id: 'p3', name: 'Read 20 mins', category: 'Learning', icon: '📚', enabled: true, microAction: 'Read 2 pages', adaptiveMode: true, targetMinutes: 20 }
 ];
 
 function Habits({ user, isPreview = false }) {
   const [habits, setHabits] = useState([]);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [trackingHistory, setTrackingHistory] = useState({});
@@ -22,7 +23,12 @@ function Habits({ user, isPreview = false }) {
     category: 'Work',
     icon: '⭐',
     reminderEnabled: false,
-    reminderTime: ''
+    reminderTime: '',
+    microAction: '',
+    adaptiveMode: true,
+    targetMinutes: 10,
+    locationLabel: '',
+    preferredWeather: 'any'
   });
 
   const categories = ['Work', 'Health', 'Learning', 'Lifestyle', 'Social'];
@@ -110,9 +116,15 @@ function Habits({ user, isPreview = false }) {
         category: newHabit.category,
         icon: newHabit.icon,
         reminderEnabled,
-        reminderTime: reminderEnabled ? reminderTime : ''
+        reminderTime: reminderEnabled ? reminderTime : '',
+        microAction: String(newHabit.microAction || '').trim(),
+        adaptiveMode: Boolean(newHabit.adaptiveMode),
+        targetMinutes: Math.max(1, Number(newHabit.targetMinutes || 10)),
+        locationLabel: String(newHabit.locationLabel || '').trim(),
+        preferredWeather: String(newHabit.preferredWeather || 'any')
       });
-      setNewHabit({ name: '', category: 'Work', icon: '⭐', reminderEnabled: false, reminderTime: '' });
+      setNewHabit({ name: '', category: 'Work', icon: '⭐', reminderEnabled: false, reminderTime: '', microAction: '', adaptiveMode: true, targetMinutes: 10, locationLabel: '', preferredWeather: 'any' });
+      setShowAdvancedOptions(false);
       setShowAddForm(false);
     } catch (err) {
       console.error('Error:', err);
@@ -218,6 +230,7 @@ function Habits({ user, isPreview = false }) {
                 return;
               }
               setShowAddForm(true);
+              setShowAdvancedOptions(false);
             }}
           >
             + Add Habit
@@ -282,31 +295,108 @@ function Habits({ user, isPreview = false }) {
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label>Daily Reminder (Optional)</label>
-                  <div className="habit-reminder-builder">
-                    <label className="habit-reminder-toggle">
+                <button
+                  type="button"
+                  className="advanced-options-toggle"
+                  onClick={() => setShowAdvancedOptions((prev) => !prev)}
+                  disabled={submitting}
+                >
+                  <span>{showAdvancedOptions ? 'Hide Advanced Options' : 'Advanced Options'}</span>
+                  <span aria-hidden="true">{showAdvancedOptions ? '−' : '+'}</span>
+                </button>
+
+                {showAdvancedOptions && (
+                  <div className="advanced-options-panel">
+                    <div className="form-group">
+                      <label>Daily Reminder (Optional)</label>
+                      <div className="habit-reminder-builder">
+                        <label className="habit-reminder-toggle">
+                          <input
+                            type="checkbox"
+                            checked={newHabit.reminderEnabled}
+                            onChange={(e) => setNewHabit({ ...newHabit, reminderEnabled: e.target.checked })}
+                            disabled={submitting}
+                          />
+                          <span>Enable browser reminder</span>
+                        </label>
+                        <TimeWheelPicker
+                          value={newHabit.reminderTime}
+                          onChange={(value) => setNewHabit({ ...newHabit, reminderTime: value })}
+                          disabled={submitting || !newHabit.reminderEnabled}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="form-group">
+                      <label>Micro-Habit Version</label>
                       <input
-                        type="checkbox"
-                        checked={newHabit.reminderEnabled}
-                        onChange={(e) => setNewHabit({ ...newHabit, reminderEnabled: e.target.checked })}
+                        type="text"
+                        value={newHabit.microAction}
+                        onChange={(e) => setNewHabit({ ...newHabit, microAction: e.target.value })}
+                        placeholder="e.g., Read 2 pages / 5 push-ups / 5 minutes"
                         disabled={submitting}
                       />
-                      <span>Enable browser reminder</span>
-                    </label>
-                    <TimeWheelPicker
-                      value={newHabit.reminderTime}
-                      onChange={(value) => setNewHabit({ ...newHabit, reminderTime: value })}
-                      disabled={submitting || !newHabit.reminderEnabled}
-                    />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Target Minutes</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={newHabit.targetMinutes}
+                        onChange={(e) => setNewHabit({ ...newHabit, targetMinutes: e.target.value })}
+                        disabled={submitting}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Preferred Location (Optional)</label>
+                      <input
+                        type="text"
+                        value={newHabit.locationLabel}
+                        onChange={(e) => setNewHabit({ ...newHabit, locationLabel: e.target.value })}
+                        placeholder="e.g., Library, Gym, Home Desk"
+                        disabled={submitting}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Preferred Weather</label>
+                      <select
+                        value={newHabit.preferredWeather}
+                        onChange={(e) => setNewHabit({ ...newHabit, preferredWeather: e.target.value })}
+                        disabled={submitting}
+                      >
+                        <option value="any">Any weather</option>
+                        <option value="clear">Clear / pleasant</option>
+                        <option value="rain">Rainy</option>
+                        <option value="cool">Cool day</option>
+                        <option value="warm">Warm day</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="habit-reminder-toggle">
+                        <input
+                          type="checkbox"
+                          checked={newHabit.adaptiveMode}
+                          onChange={(e) => setNewHabit({ ...newHabit, adaptiveMode: e.target.checked })}
+                          disabled={submitting}
+                        />
+                        <span>Auto-adjust difficulty if I start skipping</span>
+                      </label>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
                   <button 
                     type="button" 
                     className="btn btn-secondary" 
-                    onClick={() => setShowAddForm(false)}
+                    onClick={() => {
+                      setShowAdvancedOptions(false);
+                      setShowAddForm(false);
+                    }}
                     disabled={submitting}
                   >
                     Cancel
@@ -339,6 +429,12 @@ function Habits({ user, isPreview = false }) {
                   <div className="habit-details">
                     <h3>{habit.name}</h3>
                     <span className="habit-category">{habit.category} • Streak {streakMap[habit.id] || 0}d</span>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', marginTop: '0.2rem' }}>
+                      Tiny version: {habit.microAction || `${Math.max(1, Number(habit.targetMinutes || 10))} minute version`}
+                      {habit.adaptiveMode ? ' • Adaptive mode on' : ''}
+                      {habit.locationLabel ? ` • Best at ${habit.locationLabel}` : ''}
+                      {habit.preferredWeather && habit.preferredWeather !== 'any' ? ` • ${habit.preferredWeather} weather` : ''}
+                    </div>
                     <div className="habit-reminder-row">
                       <span className="habit-reminder-label">
                         Reminder: {habit.reminderEnabled && habit.reminderTime ? habit.reminderTime : 'Off'}
@@ -368,6 +464,13 @@ function Habits({ user, isPreview = false }) {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => updateHabit(habit.id, { adaptiveMode: !habit.adaptiveMode })}
+                    style={{ padding: '0.5rem 0.875rem', fontSize: '0.875rem' }}
+                  >
+                    {habit.adaptiveMode ? 'Adaptive On' : 'Adaptive Off'}
+                  </button>
                   <button
                     className={habit.enabled ? 'btn btn-secondary' : 'btn btn-primary'}
                     onClick={() => toggleHabit(habit.id, habit.enabled)}

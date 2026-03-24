@@ -1,12 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signInWithGoogle } from '../config/firebase';
 import { createUserProfile, getUserProfile } from '../utils/firebaseService';
 
+const THEME_OPTIONS = ['dark', 'light'];
+
 function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [theme, setTheme] = useState(() => {
+    const savedTheme = localStorage.getItem('habytarc_theme');
+    if (THEME_OPTIONS.includes(savedTheme)) return savedTheme;
+    return 'dark';
+  });
   const navigate = useNavigate();
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('habytarc_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
+  const isDark = theme === 'dark';
+  const themeIcon = isDark ? '☀' : '🌙';
+  const themeAria = isDark ? 'Switch to light mode' : 'Switch to dark mode';
 
   const handleGoogleSignIn = async () => {
     setLoading(true);
@@ -54,6 +74,16 @@ function Login() {
           <button type="button" className="auth-link-btn" onClick={() => navigate('/peek')} disabled={loading}>
             Take a Peek
           </button>
+          <button
+            type="button"
+            className="auth-theme-toggle"
+            onClick={toggleTheme}
+            aria-label={themeAria}
+            title={themeAria}
+            disabled={loading}
+          >
+            <span aria-hidden="true">{themeIcon}</span>
+          </button>
           <button type="button" className="auth-get-started-btn" onClick={handleGoogleSignIn} disabled={loading}>
             {loading ? 'Getting Started...' : 'Get Started'}
           </button>
@@ -67,7 +97,7 @@ function Login() {
           <span> Track Habits Without Noise</span>
         </h1>
         <p className="auth-landing-subtitle">
-          HabytARC brings habits, to-dos, exam mode, and AI-assisted study planning into one clean workspace with practical daily insights.
+          HabytARC now opens into two focused spaces after sign-in: HabytARC for habits and daily flow, and Zenvy for unit-wise exam progress and study planning.
         </p>
 
         <div className="auth-hero-actions">
@@ -75,10 +105,10 @@ function Login() {
             Take a Peek
           </button>
           <button type="button" className="auth-hero-cta" onClick={handleGoogleSignIn} disabled={loading}>
-            {loading ? 'Connecting Google...' : 'Launch My Habit Arc'}
+            {loading ? 'Connecting Google...' : 'Choose My Workspace'}
             <span aria-hidden="true">→</span>
           </button>
-          <span className="auth-hero-note">Google sign-in only. Setup takes less than a minute.</span>
+          <span className="auth-hero-note">Google sign-in only. After login, choose HabytARC or Zenvy.</span>
         </div>
 
         {error && <div className="error-message auth-landing-error">{error}</div>}
@@ -96,8 +126,8 @@ function Login() {
           </article>
           <article className="auth-landing-card">
             <span className="auth-card-label">Learn</span>
-            <h3>Exam Mode</h3>
-            <p>Organize subjects, extract syllabus with AI, group units cleanly, and open study materials in one place.</p>
+            <h3>Zenvy Workspace</h3>
+            <p>Track subjects, extract syllabus with AI, group chapters by unit, and manage study materials in a dedicated exam workspace.</p>
           </article>
           <article className="auth-landing-card">
             <span className="auth-card-label">Connect</span>
@@ -108,7 +138,7 @@ function Login() {
       </main>
 
       <footer className="auth-landing-footer">
-        HabytARC - consistency that compounds.
+        HabytARC for daily momentum. Zenvy for exam clarity.
       </footer>
     </div>
   );

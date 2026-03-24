@@ -1,14 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signOutUser } from '../config/firebase';
-import { getUserHabits, getTrackingHistory, updateUserProfile } from '../utils/firebaseService';
+import { getUserHabits, getTrackingHistory, submitAnonymousFeedback, updateUserProfile } from '../utils/firebaseService';
 import { getCareerInfo } from '../utils/careerHabits';
+import { getHabitStreakMap } from '../utils/dateUtils';
+import { deriveGamification, deriveWeeklyConsistency, normalizeMoodHistory } from '../utils/habitProgression';
 
 function Profile({ user, userData, theme, themeOptions = [], onThemeChange, onProfileUpdated, isPreview = false }) {
-  const [stats, setStats] = useState({ totalHabits: 0, totalDays: 0 });
+  const [stats, setStats] = useState({ totalHabits: 0, totalDays: 0, habits: [], history: {} });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [submittingFeedback, setSubmittingFeedback] = useState(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState('');
+  const [feedbackError, setFeedbackError] = useState('');
   const [showEditForm, setShowEditForm] = useState(false);
+  const [showFeedbackForm, setShowFeedbackForm] = useState(false);
   const [profileForm, setProfileForm] = useState({
     name: '',
     picture: '',
@@ -16,11 +22,17 @@ function Profile({ user, userData, theme, themeOptions = [], onThemeChange, onPr
     cheatDay: 'sunday',
     theme: 'dark'
   });
+  const [feedbackForm, setFeedbackForm] = useState({
+    category: 'general',
+    rating: 5,
+    message: '',
+    contact: ''
+  });
   const navigate = useNavigate();
 
   useEffect(() => {
     if (isPreview) {
-      setStats({ totalHabits: 4, totalDays: 28 });
+      setStats({ totalHabits: 4, totalDays: 28, habits: [], history: {} });
       setLoading(false);
       return;
     }
@@ -46,7 +58,9 @@ function Profile({ user, userData, theme, themeOptions = [], onThemeChange, onPr
 
       setStats({
         totalHabits: habits.length,
-        totalDays: Object.keys(history).length
+        totalDays: Object.keys(history).length,
+        habits,
+        history
       });
     } catch (error) {
       console.error('Error loading profile stats:', error);
@@ -73,6 +87,10 @@ function Profile({ user, userData, theme, themeOptions = [], onThemeChange, onPr
 
   const handleProfileChange = (field, value) => {
     setProfileForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const updateFeedbackField = (field, value) => {
+    setFeedbackForm((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleProfileImageUpload = (event) => {
@@ -168,10 +186,54 @@ function Profile({ user, userData, theme, themeOptions = [], onThemeChange, onPr
     }
   };
 
+  const handleSubmitFeedback = async (event) => {
+    event.preventDefault();
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
+
+    setSubmittingFeedback(true);
+    setFeedbackError('');
+    setFeedbackSuccess('');
+
+    try {
+      await submitAnonymousFeedback(feedbackForm);
+      setFeedbackSuccess('Thanks. Your anonymous feedback was submitted.');
+      setFeedbackForm((prev) => ({ ...prev, message: '', contact: '' }));
+      setShowFeedbackForm(false);
+    } catch (error) {
+      console.error('Profile feedback submit failed:', error);
+      const permissionDenied = String(error?.code || '').toLowerCase().includes('permission-denied')
+        || String(error?.message || '').toLowerCase().includes('insufficient permissions');
+      setFeedbackError(
+        permissionDenied
+          ? 'Feedback is blocked by Firestore rules. Please allow writes to /feedback or /users/{uid}/feedback.'
+          : (error?.message || 'Failed to submit feedback. Please try again.')
+      );
+    } finally {
+      setSubmittingFeedback(false);
+    }
+  };
+
   const careerInfo = getCareerInfo(profileForm.career || 'general');
   const memberSince = userData?.createdAt 
     ? new Date(userData.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
     : 'Recently';
+  const moodEntries = Object.keys(normalizeMoodHistory(userData?.moodHistory || {})).length;
+  const streakMap = getHabitStreakMap(stats.habits, stats.history, profileForm.cheatDay || 'sunday');
+  const gamification = deriveGamification({
+    habits: stats.habits,
+    trackingHistory: stats.history,
+    todayTracking: {},
+    todayStatus: {},
+    streakMap
+  });
+  const weeklyConsistency = deriveWeeklyConsistency({
+    habits: stats.habits,
+    trackingHistory: stats.history,
+    cheatDay: profileForm.cheatDay || 'sunday'
+  });
 
   if (loading) {
     return (
@@ -200,6 +262,12 @@ function Profile({ user, userData, theme, themeOptions = [], onThemeChange, onPr
               onClick={() => setShowEditForm((prev) => !prev)}
             >
               {showEditForm ? 'Hide Edit' : 'Edit Profile'}
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => setShowFeedbackForm((prev) => !prev)}
+            >
+              {showFeedbackForm ? 'Hide Feedback' : 'Feedback'}
             </button>
             <button className="btn btn-secondary" onClick={handleLogout}>
               {isPreview ? 'Login to Continue' : 'Log Out'}
@@ -320,6 +388,23 @@ function Profile({ user, userData, theme, themeOptions = [], onThemeChange, onPr
 
               <div className="form-group">
                 <label>App Theme</label>
+                <div className="profile-theme-toggle" role="group" aria-label="Choose app theme">
+                  {themeOptions.map((item) => {
+                    const isActive = profileForm.theme === item;
+                    return (
+                      <button
+                        key={item}
+                        type="button"
+                        className={isActive ? 'profile-theme-option active' : 'profile-theme-option'}
+                        onClick={() => handleProfileChange('theme', item)}
+                        disabled={saving}
+                        aria-pressed={isActive}
+                      >
+                        {item.charAt(0).toUpperCase() + item.slice(1)}
+                      </button>
+                    );
+                  })}
+                </div>
                 <select
                   value={profileForm.theme}
                   onChange={(e) => handleProfileChange('theme', e.target.value)}
@@ -342,6 +427,67 @@ function Profile({ user, userData, theme, themeOptions = [], onThemeChange, onPr
           </div>
         )}
 
+        {showFeedbackForm && (
+          <div style={{
+            marginBottom: '2rem',
+            padding: '1.5rem',
+            background: 'var(--bg-primary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-lg)'
+          }}>
+            <h2 style={{ marginBottom: '1rem' }}>Anonymous Feedback</h2>
+            <p className="feedback-subtitle">Share suggestions without leaving your profile.</p>
+            {feedbackError && <div className="error-message" style={{ marginBottom: '1rem' }}>{feedbackError}</div>}
+            {feedbackSuccess && <div className="feedback-success-message">{feedbackSuccess}</div>}
+            <form className="auth-form" onSubmit={handleSubmitFeedback}>
+              <div className="form-group">
+                <label>Category</label>
+                <select value={feedbackForm.category} onChange={(e) => updateFeedbackField('category', e.target.value)} disabled={submittingFeedback}>
+                  <option value="general">General</option>
+                  <option value="bug">Bug Report</option>
+                  <option value="feature">Feature Request</option>
+                  <option value="ui">Design / UI</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Rating (1-5)</label>
+                <select value={feedbackForm.rating} onChange={(e) => updateFeedbackField('rating', Number(e.target.value))} disabled={submittingFeedback}>
+                  {[5, 4, 3, 2, 1].map((value) => (
+                    <option key={value} value={value}>{value}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Message</label>
+                <textarea
+                  value={feedbackForm.message}
+                  onChange={(e) => updateFeedbackField('message', e.target.value)}
+                  required
+                  disabled={submittingFeedback}
+                  rows={5}
+                  placeholder="What should we improve?"
+                  className="feedback-textarea"
+                />
+              </div>
+              <div className="form-group">
+                <label>Contact (optional)</label>
+                <input
+                  type="text"
+                  value={feedbackForm.contact}
+                  onChange={(e) => updateFeedbackField('contact', e.target.value)}
+                  disabled={submittingFeedback}
+                  placeholder="Email or social handle"
+                />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button type="submit" className="btn btn-primary" disabled={submittingFeedback}>
+                  {submittingFeedback ? 'Submitting...' : 'Submit Feedback'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
         <div className="stats-grid">
           <div className="stat-card">
             <div className="stat-label">Days Tracked</div>
@@ -356,6 +502,43 @@ function Profile({ user, userData, theme, themeOptions = [], onThemeChange, onPr
             <div className="stat-value" style={{ fontSize: '1.25rem', textTransform: 'capitalize' }}>
               {profileForm.cheatDay || 'Sunday'}
             </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Current Level</div>
+            <div className="stat-value" style={{ fontSize: '1.25rem' }}>{gamification.levelName}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Weekly Consistency</div>
+            <div className="stat-value">{weeklyConsistency}%</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Mood Check-ins</div>
+            <div className="stat-value">{moodEntries}</div>
+          </div>
+        </div>
+
+        <div className="chart-container" style={{ marginBottom: '1rem' }}>
+          <div className="home-section-header home-section-header-wrap">
+            <div>
+              <h3>Progression</h3>
+              <p className="page-subtitle">Your current XP path and unlocked milestones.</p>
+            </div>
+            <span className="badge">XP {gamification.xp}</span>
+          </div>
+          <div className="exam-linear-progress" style={{ marginBottom: '0.9rem' }}>
+            <span style={{ width: `${gamification.levelProgressPercent}%` }} />
+          </div>
+          <div className="profile-badges">
+            {gamification.achievements.length > 0 ? (
+              gamification.achievements.map((achievement) => (
+                <span key={achievement.id} className="badge">{achievement.label}</span>
+              ))
+            ) : (
+              <span className="badge">No achievements yet</span>
+            )}
+            <span className="badge">
+              {userData?.streakInsuranceWeek ? 'Streak insurance used recently' : 'Streak insurance unused this week'}
+            </span>
           </div>
         </div>
 

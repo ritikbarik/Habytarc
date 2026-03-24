@@ -2,6 +2,7 @@ import {
   collection, 
   doc, 
   addDoc,
+  arrayUnion,
   setDoc, 
   getDoc, 
   getDocs, 
@@ -65,6 +66,29 @@ export const getUserProfile = async (uid) => {
 
 export const updateUserProfile = async (uid, data) => {
   await updateDoc(doc(db, 'users', uid), data);
+};
+
+export const saveDailyMood = async (uid, dateKey, moodValue) => {
+  if (!uid || !dateKey) {
+    throw new Error('Missing mood fields');
+  }
+
+  await updateDoc(doc(db, 'users', uid), {
+    [`moodHistory.${String(dateKey)}`]: String(moodValue || '').toLowerCase(),
+    moodUpdatedAtMs: Date.now()
+  });
+};
+
+export const consumeStreakInsurance = async (uid, weekKey, habitId) => {
+  if (!uid || !weekKey) {
+    throw new Error('Missing streak insurance fields');
+  }
+
+  await updateDoc(doc(db, 'users', uid), {
+    streakInsuranceWeek: String(weekKey),
+    streakInsuranceHabitId: String(habitId || ''),
+    streakInsuranceUsedAtMs: Date.now()
+  });
 };
 
 export const savePushToken = async (uid, token, metadata = {}) => {
@@ -657,6 +681,114 @@ export const createExamSubject = async (uid, subjectData) => {
   });
 
   return subjectId;
+};
+
+export const upsertPublicProfile = async (uid, profile = {}) => {
+  if (!uid) throw new Error('Missing user ID');
+
+  const payload = {
+    userId: uid,
+    displayName: String(profile?.displayName || 'HabytARC User').trim() || 'HabytARC User',
+    buddyCode: String(profile?.buddyCode || uid.slice(0, 6).toUpperCase()).trim().toUpperCase(),
+    xp: Math.max(0, Number(profile?.xp || 0)),
+    levelName: String(profile?.levelName || 'Beginner').trim() || 'Beginner',
+    streak: Math.max(0, Number(profile?.streak || 0)),
+    updatedAtMs: Date.now()
+  };
+
+  await setDoc(doc(db, 'public_profiles', uid), payload, { merge: true });
+};
+
+export const subscribePublicLeaderboard = (callback) => {
+  const leaderboardQuery = query(collection(db, 'public_profiles'));
+  return onSnapshot(
+    leaderboardQuery,
+    (snapshot) => {
+      const items = snapshot.docs
+        .map((item) => ({ id: item.id, ...item.data() }))
+        .sort((a, b) => {
+          const xpDiff = Number(b.xp || 0) - Number(a.xp || 0);
+          if (xpDiff !== 0) return xpDiff;
+          return Number(b.streak || 0) - Number(a.streak || 0);
+        });
+      callback(items);
+    },
+    (error) => {
+      console.error('subscribePublicLeaderboard failed:', error);
+      callback([]);
+    }
+  );
+};
+
+export const getPublicProfileByBuddyCode = async (buddyCode) => {
+  const code = String(buddyCode || '').trim().toUpperCase();
+  if (!code) return null;
+  const buddyQuery = query(collection(db, 'public_profiles'), where('buddyCode', '==', code), limit(1));
+  const snapshot = await getDocs(buddyQuery);
+  if (snapshot.empty) return null;
+  return { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+};
+
+export const createChallengeRoom = async (uid, room = {}) => {
+  if (!uid) throw new Error('Missing user ID');
+  const roomCode = String(room?.roomCode || `ROOM-${Math.random().toString(36).slice(2, 7).toUpperCase()}`);
+  const roomRef = doc(collection(db, 'challenge_rooms'));
+  await setDoc(roomRef, {
+    name: String(room?.name || 'Focus Room').trim() || 'Focus Room',
+    roomCode,
+    ownerId: uid,
+    createdAtMs: Date.now(),
+    participantIds: [uid],
+    participants: [
+      {
+        uid,
+        name: String(room?.displayName || 'HabytARC User').trim() || 'HabytARC User',
+        xp: Math.max(0, Number(room?.xp || 0))
+      }
+    ]
+  });
+  return roomRef.id;
+};
+
+export const joinChallengeRoom = async (uid, roomCode, participant = {}) => {
+  if (!uid) throw new Error('Missing user ID');
+  const code = String(roomCode || '').trim().toUpperCase();
+  if (!code) throw new Error('Room code is required');
+
+  const roomQuery = query(collection(db, 'challenge_rooms'), where('roomCode', '==', code), limit(1));
+  const snapshot = await getDocs(roomQuery);
+  if (snapshot.empty) throw new Error('Room not found');
+  const roomRef = snapshot.docs[0].ref;
+  const current = snapshot.docs[0].data() || {};
+  const participantIds = Array.isArray(current.participantIds) ? current.participantIds : [];
+  if (participantIds.includes(uid)) return snapshot.docs[0].id;
+
+  await updateDoc(roomRef, {
+    participantIds: arrayUnion(uid),
+    participants: arrayUnion({
+      uid,
+      name: String(participant?.name || 'HabytARC User').trim() || 'HabytARC User',
+      xp: Math.max(0, Number(participant?.xp || 0))
+    })
+  });
+  return snapshot.docs[0].id;
+};
+
+export const subscribeChallengeRooms = (callback) => {
+  const roomsQuery = query(collection(db, 'challenge_rooms'));
+  return onSnapshot(
+    roomsQuery,
+    (snapshot) => {
+      const items = snapshot.docs
+        .map((item) => ({ id: item.id, ...item.data() }))
+        .sort((a, b) => Number(b.createdAtMs || 0) - Number(a.createdAtMs || 0));
+      callback(items);
+    },
+    (error) => {
+      console.error('subscribeChallengeRooms failed:', error);
+      callback([]);
+    }
+  );
 };
 
 export const updateExamSubject = async (uid, subjectId, updates = {}) => {

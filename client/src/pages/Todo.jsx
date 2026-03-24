@@ -14,6 +14,7 @@ const previewTodos = [
 function Todo({ user, userData, onProfileUpdated, isPreview = false }) {
   const [todos, setTodos] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [newTodo, setNewTodo] = useState({
     text: '',
     category: 'general',
@@ -157,40 +158,6 @@ function Todo({ user, userData, onProfileUpdated, isPreview = false }) {
     }
   };
 
-  const sendTestNotification = async () => {
-    if (isPreview) {
-      lockAction();
-      return;
-    }
-    if (!isNotificationSupported()) {
-      setError('This browser does not support notifications.');
-      return;
-    }
-
-    try {
-      let permission = Notification.permission;
-      if (permission === 'default') permission = await requestNotificationPermission();
-      if (permission !== 'granted') {
-        setError('Notification permission is blocked. Allow notifications in your browser settings.');
-        return;
-      }
-
-      const result = await sendAppNotification('HabytARC Test Notification', {
-        body: 'Notifications are working for this browser.',
-        tag: `habytarc_test_${Date.now()}`
-      });
-      if (!result.ok) {
-        setError('Notification delivery failed on this browser/device.');
-        return;
-      }
-      setSuccess('Test notification sent.');
-      setError('');
-    } catch (error) {
-      console.error('Test notification failed:', error);
-      setError('Failed to send test notification.');
-    }
-  };
-
   const handleAdd = async (event) => {
     event.preventDefault();
     const trimmed = newTodo.text.trim();
@@ -285,6 +252,7 @@ function Todo({ user, userData, onProfileUpdated, isPreview = false }) {
         notes: '',
         subtasksText: ''
       });
+      setShowAdvancedOptions(false);
       setSuccess('To-do added.');
     } catch (error) {
       console.error('Add todo failed:', error);
@@ -402,15 +370,6 @@ function Todo({ user, userData, onProfileUpdated, isPreview = false }) {
               />
               <span>Remind me about overdue and due-today to-dos</span>
             </label>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={sendTestNotification}
-              disabled={reminderSaving}
-              style={{ padding: '0.4rem 0.7rem', fontSize: '0.82rem' }}
-            >
-              Test Notification
-            </button>
           </div>
           <form onSubmit={handleAdd} className="todo-form">
             <div className="todo-form-primary">
@@ -427,75 +386,89 @@ function Todo({ user, userData, onProfileUpdated, isPreview = false }) {
               </button>
             </div>
 
-            <div className="todo-form-advanced">
-              <select
-                value={newTodo.priority}
-                onChange={(e) => setNewTodo((prev) => ({ ...prev, priority: e.target.value }))}
-                className="chat-input todo-field-sm"
-                disabled={saving}
-              >
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-              </select>
-              <input
-                type="text"
-                value={newTodo.category}
-                onChange={(e) => setNewTodo((prev) => ({ ...prev, category: e.target.value }))}
-                placeholder="Category"
-                className="chat-input todo-field-sm"
-                disabled={saving}
-              />
-              <input
-                type="date"
-                value={newTodo.dueDate}
-                onChange={(e) => setNewTodo((prev) => ({ ...prev, dueDate: e.target.value }))}
-                className="chat-input todo-field-sm"
-                disabled={saving}
-              />
-              <select
-                value={newTodo.recurrence}
-                onChange={(e) => setNewTodo((prev) => ({ ...prev, recurrence: e.target.value }))}
-                className="chat-input todo-field-sm"
-                disabled={saving}
-              >
-                <option value="none">No Repeat</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
-              <label className="todo-item-reminder-toggle">
-                <input
-                  type="checkbox"
-                  checked={Boolean(newTodo.reminderEnabled)}
-                  onChange={(e) => setNewTodo((prev) => ({ ...prev, reminderEnabled: e.target.checked }))}
-                  disabled={saving}
-                />
-                <span>Task reminder</span>
-              </label>
-              <TimeWheelPicker
-                value={newTodo.reminderTime}
-                onChange={(value) => setNewTodo((prev) => ({ ...prev, reminderTime: value }))}
-                className="todo-field-sm"
-                disabled={saving || !newTodo.reminderEnabled}
-              />
-              <input
-                type="text"
-                value={newTodo.subtasksText}
-                onChange={(e) => setNewTodo((prev) => ({ ...prev, subtasksText: e.target.value }))}
-                placeholder="Subtasks (comma separated)"
-                className="chat-input"
-                disabled={saving}
-              />
-              <input
-                type="text"
-                value={newTodo.notes}
-                onChange={(e) => setNewTodo((prev) => ({ ...prev, notes: e.target.value }))}
-                placeholder="Notes (optional)"
-                className="chat-input"
-                disabled={saving}
-              />
-            </div>
+            <button
+              type="button"
+              className="advanced-options-toggle"
+              onClick={() => setShowAdvancedOptions((prev) => !prev)}
+              disabled={saving}
+            >
+              <span>{showAdvancedOptions ? 'Hide Advanced Options' : 'Advanced Options'}</span>
+              <span aria-hidden="true">{showAdvancedOptions ? '−' : '+'}</span>
+            </button>
+
+            {showAdvancedOptions && (
+              <div className="advanced-options-panel">
+                <div className="todo-form-advanced">
+                  <select
+                    value={newTodo.priority}
+                    onChange={(e) => setNewTodo((prev) => ({ ...prev, priority: e.target.value }))}
+                    className="chat-input todo-field-sm"
+                    disabled={saving}
+                  >
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                  <input
+                    type="text"
+                    value={newTodo.category}
+                    onChange={(e) => setNewTodo((prev) => ({ ...prev, category: e.target.value }))}
+                    placeholder="Category"
+                    className="chat-input todo-field-sm"
+                    disabled={saving}
+                  />
+                  <input
+                    type="date"
+                    value={newTodo.dueDate}
+                    onChange={(e) => setNewTodo((prev) => ({ ...prev, dueDate: e.target.value }))}
+                    className="chat-input todo-field-sm"
+                    disabled={saving}
+                  />
+                  <select
+                    value={newTodo.recurrence}
+                    onChange={(e) => setNewTodo((prev) => ({ ...prev, recurrence: e.target.value }))}
+                    className="chat-input todo-field-sm"
+                    disabled={saving}
+                  >
+                    <option value="none">No Repeat</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                  <label className="todo-item-reminder-toggle">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(newTodo.reminderEnabled)}
+                      onChange={(e) => setNewTodo((prev) => ({ ...prev, reminderEnabled: e.target.checked }))}
+                      disabled={saving}
+                    />
+                    <span>Task reminder</span>
+                  </label>
+                  <TimeWheelPicker
+                    value={newTodo.reminderTime}
+                    onChange={(value) => setNewTodo((prev) => ({ ...prev, reminderTime: value }))}
+                    className="todo-field-sm"
+                    disabled={saving || !newTodo.reminderEnabled}
+                  />
+                  <input
+                    type="text"
+                    value={newTodo.subtasksText}
+                    onChange={(e) => setNewTodo((prev) => ({ ...prev, subtasksText: e.target.value }))}
+                    placeholder="Subtasks (comma separated)"
+                    className="chat-input"
+                    disabled={saving}
+                  />
+                  <input
+                    type="text"
+                    value={newTodo.notes}
+                    onChange={(e) => setNewTodo((prev) => ({ ...prev, notes: e.target.value }))}
+                    placeholder="Notes (optional)"
+                    className="chat-input"
+                    disabled={saving}
+                  />
+                </div>
+              </div>
+            )}
           </form>
           <div className="todo-filter-row">
             <button type="button" className={`btn ${filter === 'all' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFilter('all')}>All</button>

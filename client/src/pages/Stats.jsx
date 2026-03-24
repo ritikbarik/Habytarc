@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { getUserHabits, getTrackingHistory } from '../utils/firebaseService';
 import { getDateString, getHabitStreakMap, isCheatDayForDate } from '../utils/dateUtils';
+import { deriveBestPerformanceWindow, deriveGamification, deriveMoodCorrelation, deriveWeeklyConsistency, getHabitCompletionStats, normalizeMoodHistory } from '../utils/habitProgression';
 
 const SERIES_COLORS = [
   '#2563eb',
@@ -205,6 +206,52 @@ function Stats({ user, userData, isPreview = false }) {
   const chartHeight = 220;
   const xStep = selectedRange === 90 ? 16 : selectedRange === 30 ? 24 : 34;
   const chartWidth = Math.max((chartData.labels.length - 1) * xStep, 320);
+  const weeklyConsistency = deriveWeeklyConsistency({
+    habits,
+    trackingHistory,
+    cheatDay,
+    rangeDays: 7
+  });
+  const bestPerformanceWindow = deriveBestPerformanceWindow({ habits, streakMap });
+  const moodCorrelation = deriveMoodCorrelation({
+    moodHistory: normalizeMoodHistory(userData?.moodHistory || {}),
+    trackingHistory,
+    habits
+  });
+  const gamification = deriveGamification({
+    habits,
+    trackingHistory,
+    todayTracking: {},
+    todayStatus: {},
+    streakMap
+  });
+  const categoryBreakdown = useMemo(() => {
+    const grouped = {};
+    habits.forEach((habit) => {
+      const category = String(habit.category || 'General');
+      if (!grouped[category]) {
+        grouped[category] = { category, total: 0, completed: 0 };
+      }
+      grouped[category].total += 1;
+      const stats = getHabitCompletionStats({ trackingHistory, habitId: habit.id, rangeDays: 14 });
+      grouped[category].completed += stats.completed;
+    });
+
+    return Object.values(grouped).map((item) => ({
+      ...item,
+      score: item.total ? Math.min(100, Math.round((item.completed / (item.total * 14)) * 100)) : 0
+    }));
+  }, [habits, trackingHistory]);
+  const resilience = useMemo(() => {
+    const summary = { skipped: 0, rescheduled: 0, completed: 0 };
+    habits.forEach((habit) => {
+      const stats = getHabitCompletionStats({ trackingHistory, habitId: habit.id, rangeDays: 14 });
+      summary.skipped += stats.skipped;
+      summary.rescheduled += stats.rescheduled;
+      summary.completed += stats.completed;
+    });
+    return summary;
+  }, [habits, trackingHistory]);
 
   const dayInsights = useMemo(() => {
     const stats = WEEKDAYS.reduce((acc, day) => {
@@ -301,6 +348,14 @@ function Stats({ user, userData, isPreview = false }) {
             <div className="stat-label">Best Current Streak</div>
             <div className="stat-value">{bestStreak}d</div>
           </div>
+          <div className="stat-card">
+            <div className="stat-label">Weekly Consistency</div>
+            <div className="stat-value">{weeklyConsistency}%</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Best Time Window</div>
+            <div className="stat-value" style={{ fontSize: '1.25rem' }}>{bestPerformanceWindow}</div>
+          </div>
         </div>
 
         <div className="chart-container">
@@ -312,6 +367,13 @@ function Stats({ user, userData, isPreview = false }) {
             {' • '}
             Toughest day: <strong>{dayInsights.worst.day}</strong> ({dayInsights.worst.completion}%)
           </p>
+          <div className="profile-badges" style={{ marginTop: '0.9rem' }}>
+            <span className="badge">XP {gamification.xp}</span>
+            <span className="badge">{gamification.levelName}</span>
+            {gamification.achievements.map((achievement) => (
+              <span key={achievement.id} className="badge">{achievement.label}</span>
+            ))}
+          </div>
           <div style={{ marginTop: '0.9rem', display: 'grid', gridTemplateColumns: 'repeat(18, minmax(0, 1fr))', gap: '4px' }}>
             {heatmapDays.map((item) => {
               const isCheat = item.ratio === null;
@@ -330,6 +392,34 @@ function Stats({ user, userData, isPreview = false }) {
                 />
               );
             })}
+          </div>
+        </div>
+
+        <div className="chart-container">
+          <div className="chart-header">
+            <h2>Category Consistency</h2>
+          </div>
+          {categoryBreakdown.length > 0 ? (
+            <div className="home-list-stack">
+              {categoryBreakdown.map((item) => (
+                <div key={item.category}>
+                  <div className="home-section-header" style={{ marginBottom: '0.4rem' }}>
+                    <strong>{item.category}</strong>
+                    <span style={{ color: 'var(--text-secondary)' }}>{item.score}%</span>
+                  </div>
+                  <div className="exam-linear-progress">
+                    <span style={{ width: `${item.score}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={{ color: 'var(--text-secondary)' }}>Add habits in different categories to compare consistency.</p>
+          )}
+          <div className="profile-badges" style={{ marginTop: '1rem' }}>
+            <span className="badge">Completed (14d): {resilience.completed}</span>
+            <span className="badge">Skipped (14d): {resilience.skipped}</span>
+            <span className="badge">Moved (14d): {resilience.rescheduled}</span>
           </div>
         </div>
 
@@ -460,11 +550,31 @@ function Stats({ user, userData, isPreview = false }) {
                   ))}
               </div>
               <p style={{ marginTop: '0.75rem', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-                Timeline covers the recent {chartData.daysTracked} day(s).
-              </p>
+            Timeline covers the recent {chartData.daysTracked} day(s).
+          </p>
 
-              {habits.length > 0 && (
-                <div style={{ marginTop: '1rem' }}>
+          <div style={{ marginTop: '1rem', padding: '1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-secondary)' }}>
+            <h3 style={{ fontSize: '1rem', marginBottom: '0.45rem' }}>Mood + Habit Correlation</h3>
+            {moodCorrelation.averageMoodOnTrackedDays ? (
+              <>
+                <p style={{ color: 'var(--text-secondary)' }}>
+                  Average mood overall: <strong>{moodCorrelation.averageMoodOnTrackedDays}/5</strong>
+                  {' • '}
+                  On active habit days: <strong>{moodCorrelation.averageMoodOnWorkoutDays}/5</strong>
+                </p>
+                {moodCorrelation.happiestHabitDay && (
+                  <p style={{ color: 'var(--text-secondary)', marginTop: '0.45rem' }}>
+                    {moodCorrelation.happiestHabitDay}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p style={{ color: 'var(--text-secondary)' }}>Add daily mood check-ins on Home to unlock mood correlation insights.</p>
+            )}
+          </div>
+
+          {habits.length > 0 && (
+            <div style={{ marginTop: '1rem' }}>
                   <h3 style={{ fontSize: '1rem', marginBottom: '0.6rem' }}>Current Streak by Habit</h3>
                   <div className="profile-badges">
                     {habits.map((habit) => (

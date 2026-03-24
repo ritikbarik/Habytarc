@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   completeTodoWithRecurrence,
+  consumeStreakInsurance,
   subscribeToHabits,
   subscribeToTodos,
   updateTodo,
@@ -14,83 +15,73 @@ import {
   resolvePendingTask
 } from '../utils/firebaseService';
 import { isCheatDay, getDateAfterDays, getDateString, getNextWeekdayDate, getTodayProgress, getHabitStreakMap } from '../utils/dateUtils';
-import { getWeatherFallbackSnapshot, isSevereWeatherCode } from '../utils/weatherService';
+import { deriveAdaptiveMicroHabit, deriveGamification, deriveHabitRisk, getCurrentWeekKey } from '../utils/habitProgression';
 import { sendAppNotification, isNotificationSupported } from '../utils/notificationService';
 
-const refreshQuotes = [
-  'You do not rise to the level of your goals. You fall to the level of your systems.',
-  'Every action you take is a vote for the type of person you wish to become.',
-  'Success is the product of daily habits, not once-in-a-lifetime transformations.',
-  'Habits are the compound interest of self-improvement.',
-  'You should be far more concerned with your current trajectory than with your current results.',
-  'Make it obvious. Make it attractive. Make it easy. Make it satisfying.',
-  'Professionals stick to the schedule; amateurs let life get in the way.',
-  'The purpose of setting goals is to win the game. The purpose of building systems is to continue playing.'
-];
-
-const getGreetingByTime = (name) => {
-  const hour = new Date().getHours();
-  const safeName = name || 'there';
-
-  if (hour < 12) return `Good morning, ${safeName}`;
-  if (hour < 17) return `Good afternoon, ${safeName}`;
-  return `Good evening, ${safeName}`;
+const GREETING_POOLS = {
+  morning: [
+    'let’s build momentum 🚀',
+    'a fresh start — first win today?',
+    'rise and progress ☀️',
+    'small steps now, big results later',
+    'let’s win the day, one habit at a time'
+  ],
+  afternoon: [
+    'keep the streak alive 🔥',
+    'you’re halfway there — don’t slow down',
+    'stay consistent, you’re doing great',
+    'progress check: how are we doing?',
+    'keep pushing, even small efforts count'
+  ],
+  evening: [
+    'time to finish strong 💪',
+    'one last push for today',
+    'don’t break the chain',
+    'almost there — complete your habits',
+    'make today count before it ends'
+  ],
+  night: [
+    'reflect. reset. repeat 🌙',
+    'great work today — ready for tomorrow?',
+    'progress > perfection',
+    'you showed up today, that matters',
+    'let’s prepare for a better tomorrow'
+  ],
+  lateNight: [
+    'still going? that’s dedication 👀',
+    'rest matters too — don’t forget',
+    'even discipline needs recovery',
+    'late grind or early start? respect either way',
+    'recharge — tomorrow is another chance'
+  ]
 };
 
-const getRefreshQuote = () => {
-  const index = Math.floor(Math.random() * refreshQuotes.length);
-  return refreshQuotes[index];
-};
+const getGreetingByTime = (name, currentTime = new Date(), context = {}) => {
+  const hour = currentTime.getHours();
+  const safeName = String(name || 'there').trim();
+  const firstName = safeName.split(/\s+/)[0] || 'there';
+  const { bestStreak = 0, missedYesterday = false } = context;
 
-const formatClockValue = (date, timezone) => {
-  try {
-    return new Intl.DateTimeFormat('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true,
-      timeZone: timezone || undefined
-    }).format(date);
-  } catch (_) {
-    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  if (bestStreak >= 7) {
+    return `${firstName}, 🔥 ${bestStreak}-day streak! Don’t break it`;
   }
+
+  if (missedYesterday) {
+    return `${firstName}, let’s bounce back today`;
+  }
+
+  let bucket = 'night';
+  if (hour >= 0 && hour < 5) bucket = 'lateNight';
+  else if (hour < 12) bucket = 'morning';
+  else if (hour < 17) bucket = 'afternoon';
+  else if (hour < 21) bucket = 'evening';
+
+  const pool = GREETING_POOLS[bucket];
+  const rotationSeed = Number(getDateString(currentTime).replaceAll('-', '')) + hour;
+  const message = pool[rotationSeed % pool.length];
+  return `${firstName}, ${message}`;
 };
 
-const formatDateValue = (date, timezone) => {
-  try {
-    return new Intl.DateTimeFormat('en-US', {
-      weekday: 'long',
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric',
-      timeZone: timezone || undefined
-    }).format(date);
-  } catch (_) {
-    return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-  }
-};
-
-const getWeatherInsight = (weatherInfo, pendingHabits, openTodos) => {
-  if (!weatherInfo || Number.isNaN(Number(weatherInfo.temperatureC))) return '';
-
-  const wind = Number(weatherInfo.windSpeedKmh || 0);
-  const rain = Number(weatherInfo.precipitationMm || 0);
-  const temp = Number(weatherInfo.temperatureC || 0);
-
-  let conditionText = 'Weather looks steady outside';
-  if (wind >= 20) conditionText = 'Feels windy outside';
-  else if (rain >= 0.5) conditionText = "It's a bit rainy outside";
-  else if (temp >= 32) conditionText = "It's quite warm outside";
-  else if (temp <= 15) conditionText = "It's a bit cool outside";
-
-  if (pendingHabits > 0) {
-    return `${conditionText}, but you still have ${pendingHabits} habit${pendingHabits === 1 ? '' : 's'} pending.`;
-  }
-  if (openTodos > 0) {
-    return `${conditionText}, and you have ${openTodos} open to-do${openTodos === 1 ? '' : 's'}.`;
-  }
-  return `${conditionText}, and you're clear on today's tasks.`;
-};
 
 const previewHabits = [
   { id: 'p1', name: 'Morning Walk', category: 'Health', icon: '🚶' },
@@ -114,79 +105,26 @@ function Home({ user, userData, isPreview = false }) {
   const [isCheat, setIsCheat] = useState(false);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState('');
-  const [quote] = useState(() => getRefreshQuote());
   const [todoDayKey, setTodoDayKey] = useState(() => getDateString());
-  const [weatherInfo, setWeatherInfo] = useState({
-    loading: false,
-    error: '',
-    ...getWeatherFallbackSnapshot()
-  });
-  const [clockNow, setClockNow] = useState(() => new Date());
+  const [currentTime, setCurrentTime] = useState(() => new Date());
+  const [insuranceLoading, setInsuranceLoading] = useState('');
+  const [insuranceWeekUsed, setInsuranceWeekUsed] = useState(() => String(userData?.streakInsuranceWeek || ''));
 
   const today = getDateString();
 
   useEffect(() => {
+    setInsuranceWeekUsed(String(userData?.streakInsuranceWeek || ''));
+  }, [userData?.streakInsuranceWeek]);
+
+  useEffect(() => {
     const timer = setInterval(() => {
+      const now = new Date();
       const next = getDateString();
+      setCurrentTime(now);
       setTodoDayKey((prev) => (prev === next ? prev : next));
     }, 60 * 1000);
     return () => clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    setWeatherInfo((prev) => ({
-      ...prev,
-      ...getWeatherFallbackSnapshot(),
-      loading: false,
-      error: ''
-    }));
-  }, []);
-
-  useEffect(() => {
-    const apiTimeMs = Date.parse(String(weatherInfo.currentTimeIso || ''));
-    if (Number.isNaN(apiTimeMs)) {
-      const fallbackId = setInterval(() => setClockNow(new Date()), 1000);
-      setClockNow(new Date());
-      return () => clearInterval(fallbackId);
-    }
-
-    const startedAt = Date.now();
-    const tick = () => {
-      const delta = Date.now() - startedAt;
-      setClockNow(new Date(apiTimeMs + delta));
-    };
-    tick();
-    const timerId = setInterval(tick, 1000);
-    return () => clearInterval(timerId);
-  }, [weatherInfo.currentTimeIso]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-    if (!weatherInfo.currentTimeIso || Number.isNaN(Number(weatherInfo.weatherCode))) return;
-    if (!isSevereWeatherCode(weatherInfo.weatherCode)) return;
-
-    const dayKey = getDateString(new Date());
-    const alertStamp = `habytarc_weather_alert_${dayKey}`;
-    if (localStorage.getItem(alertStamp)) return;
-
-    const notify = () => {
-      if (Notification.permission !== 'granted') return;
-      localStorage.setItem(alertStamp, '1');
-      try {
-        sendAppNotification('HabytARC Weather Alert', {
-          body: `${weatherInfo.weatherLabel} in ${weatherInfo.cityLabel || 'your area'}. Plan your tasks accordingly.`,
-          tag: `weather_alert_${dayKey}`
-        });
-      } catch (error) {
-        console.error('Weather alert notification failed:', error);
-      }
-    };
-
-    if (Notification.permission === 'granted') {
-      notify();
-      return;
-    }
-  }, [weatherInfo.currentTimeIso, weatherInfo.weatherCode, weatherInfo.weatherLabel, weatherInfo.cityLabel]);
 
   useEffect(() => {
     if (isPreview) {
@@ -412,6 +350,24 @@ function Home({ user, userData, isPreview = false }) {
     }
   };
 
+  const completeMicroHabit = async (habit) => {
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
+    const previousStatus = todayStatus[habit.id] || 'pending';
+    setTodayTracking((prev) => ({ ...prev, [habit.id]: true }));
+    setTodayStatus((prev) => ({ ...prev, [habit.id]: 'completed' }));
+    try {
+      await saveTracking(user.uid, today, habit.id, true);
+    } catch (error) {
+      console.error('Micro-habit completion failed:', error);
+      alert('Failed to complete micro-habit.');
+      setTodayTracking((prev) => ({ ...prev, [habit.id]: false }));
+      setTodayStatus((prev) => ({ ...prev, [habit.id]: previousStatus }));
+    }
+  };
+
   const skipHabitForToday = async (habit) => {
     if (isPreview) {
       alert('Login to continue');
@@ -479,6 +435,35 @@ function Home({ user, userData, isPreview = false }) {
     }
   };
 
+  const useStreakInsurance = async (habit) => {
+    if (isPreview) {
+      alert('Login to continue');
+      return;
+    }
+    const currentWeekKey = getCurrentWeekKey();
+    if (insuranceWeekUsed === currentWeekKey) return;
+
+    const loadingKey = `insurance-${habit.id}`;
+    setInsuranceLoading(loadingKey);
+    setTodayTracking((prev) => ({ ...prev, [habit.id]: true }));
+    setTodayStatus((prev) => ({ ...prev, [habit.id]: 'completed' }));
+
+    try {
+      await Promise.all([
+        saveTracking(user.uid, today, habit.id, true),
+        consumeStreakInsurance(user.uid, currentWeekKey, habit.id)
+      ]);
+      setInsuranceWeekUsed(currentWeekKey);
+    } catch (error) {
+      console.error('Streak insurance failed:', error);
+      alert('Failed to use streak insurance.');
+      setTodayTracking((prev) => ({ ...prev, [habit.id]: false }));
+      setTodayStatus((prev) => ({ ...prev, [habit.id]: 'pending' }));
+    } finally {
+      setInsuranceLoading('');
+    }
+  };
+
   const completeTodo = async (todoItem) => {
     if (isPreview) {
       alert('Login to continue');
@@ -510,6 +495,15 @@ function Home({ user, userData, isPreview = false }) {
     [streakMap]
   );
 
+  const missedYesterday = useMemo(() => {
+    if (!Array.isArray(habits) || habits.length === 0) return false;
+    const yesterday = new Date(currentTime);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayKey = getDateString(yesterday);
+    const yesterdayTracking = trackingHistory[yesterdayKey] || {};
+    return habits.every((habit) => !yesterdayTracking[habit.id]);
+  }, [currentTime, habits, trackingHistory]);
+
   const visibleHabits = useMemo(() => {
     return habits.filter((habit) => {
       const status = String(todayStatus[habit.id] || '').toLowerCase();
@@ -519,53 +513,63 @@ function Home({ user, userData, isPreview = false }) {
     });
   }, [habits, todayStatus, todayTracking]);
 
+  const visibleHabitsWithSignals = useMemo(
+    () =>
+      visibleHabits.map((habit) => ({
+        habit,
+        microHabit: deriveAdaptiveMicroHabit(habit, trackingWithToday),
+        habitRisk: deriveHabitRisk({ habit, trackingHistory: trackingWithToday, streakMap })
+      })),
+    [visibleHabits, trackingWithToday, streakMap]
+  );
+
   const progress = habits.length > 0 ? getTodayProgress(habits, todayTracking) : 0;
   const completedCount = habits.filter(habit => todayTracking[habit.id]).length;
-  const pendingCount = pendingTasks.length;
-  const openTodos = todos.filter((item) => !item.completed).length;
-  const openTodoItems = useMemo(() => todos.filter((item) => !item.completed), [todos]);
-  const greeting = getGreetingByTime(userData?.name || user?.displayName);
-  const pendingHabitsCount = visibleHabits.length;
-  const weatherInsight = getWeatherInsight(weatherInfo, pendingHabitsCount, openTodos);
-  const weatherTimeText = formatClockValue(clockNow, weatherInfo.timezone);
-  const weatherDateText = formatDateValue(clockNow, weatherInfo.timezone);
-  const prioritizeTodo = !isCheat && visibleHabits.length === 0 && openTodoItems.length > 0;
-
-  const todoSection = (
-    <div className="chart-container home-section">
-      <div className="home-section-header home-section-header-wrap">
-        <h3>To-Do Snapshot ({openTodos} open)</h3>
-        <Link to="/todo" className="btn btn-secondary home-link-btn">
-          Open To-Do
-        </Link>
-      </div>
-      {openTodoItems.length === 0 ? (
-        <p style={{ color: 'var(--text-secondary)' }}>No to-do tasks yet.</p>
-      ) : (
-        <div className="home-list-stack">
-          {openTodoItems.slice(0, 5).map((todoItem) => (
-            <div
-              key={todoItem.id}
-              className="todo-snapshot-item"
-            >
-              <span>{todoItem.text}</span>
-              <span style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
-                {String(todoItem.priority || 'medium').toUpperCase()}
-                {todoItem.dueDate ? ` • Due ${todoItem.dueDate}` : ''}
-              </span>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => completeTodo(todoItem)}
-              >
-                Done
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+  const greeting = getGreetingByTime(userData?.name || user?.displayName, currentTime, {
+    bestStreak,
+    missedYesterday
+  });
+  const openTodoItems = useMemo(
+    () => todos.filter((item) => !item.completed),
+    [todos]
   );
+  const gamification = deriveGamification({
+    habits,
+    trackingHistory,
+    todayTracking,
+    todayStatus,
+    streakMap
+  });
+  const streakInsuranceUsed = insuranceWeekUsed === getCurrentWeekKey();
+
+  useEffect(() => {
+    if (isPreview) return;
+    if (!isNotificationSupported()) return;
+    if (Notification.permission !== 'granted') return;
+    if (!Array.isArray(visibleHabits) || visibleHabits.length === 0) return;
+
+    const now = new Date();
+    const currentHour = now.getHours();
+    if (currentHour < 18) return;
+
+    const todayKey = getDateString(now);
+    const stampKey = `habytarc_streak_warning_${user?.uid}_${todayKey}`;
+    if (localStorage.getItem(stampKey)) return;
+
+    const atRiskHabit = visibleHabits.find((habit) => deriveHabitRisk({ habit, trackingHistory: trackingWithToday, streakMap }) === 'high');
+    if (!atRiskHabit) return;
+
+    const micro = deriveAdaptiveMicroHabit(atRiskHabit, trackingWithToday);
+    localStorage.setItem(stampKey, '1');
+    try {
+      sendAppNotification('HabytARC Streak Warning', {
+        body: `Protect "${atRiskHabit.name}" with the tiny version: ${micro.label}.`,
+        tag: `streak_warning_${todayKey}`
+      });
+    } catch (error) {
+      console.error('Streak warning notification failed:', error);
+    }
+  }, [isPreview, streakMap, trackingWithToday, user?.uid, visibleHabits]);
 
   if (loading) {
     return (
@@ -590,26 +594,19 @@ function Home({ user, userData, isPreview = false }) {
               {isCheat ? (
                 <span className="cheat-day-badge">🎉 Cheat Day - Rest & Recharge</span>
               ) : (
-                <span>
-                  {weatherDateText} • {weatherTimeText}
-                  {weatherInsight ? ` • ${weatherInsight}` : ''}
-                </span>
+                <span>Stay with today&apos;s habits and keep the momentum clean.</span>
               )}
             </p>
           </div>
-        </div>
-
-        <div className="home-quote">
-          <p>
-            "{quote}"
-          </p>
         </div>
 
         {!isCheat && habits.length > 0 && (
           <div className="progress-summary">
             <div className="progress-info">
               <h2>{completedCount} of {habits.length} completed</h2>
-              <p>{visibleHabits.length} remaining • {pendingCount} pending carry-overs • {openTodos} open to-do(s) • Best streak: {bestStreak} day{bestStreak === 1 ? '' : 's'}</p>
+              <p>
+                {visibleHabits.length} remaining • Best streak {bestStreak} day{bestStreak === 1 ? '' : 's'} • XP {gamification.xp} • {gamification.levelName}
+              </p>
             </div>
             <div className="progress-circle">
               <svg viewBox="0 0 100 100">
@@ -631,7 +628,39 @@ function Home({ user, userData, isPreview = false }) {
           </div>
         )}
 
-        {prioritizeTodo && todoSection}
+        {openTodoItems.length > 0 && (
+          <div className="chart-container home-section">
+            <div className="home-section-header home-section-header-wrap">
+              <div>
+                <h3>Open To-Dos</h3>
+                <p className="page-subtitle">A quick glance so nothing important slips away.</p>
+              </div>
+              <Link to="/habytarc/todo" className="btn btn-secondary home-link-btn">
+                Open To-Do
+              </Link>
+            </div>
+            <div className="home-list-stack">
+              {openTodoItems.slice(0, 4).map((todoItem) => (
+                <div key={todoItem.id} className="todo-snapshot-item">
+                  <div>
+                    <strong>{todoItem.text}</strong>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.84rem', marginTop: '0.2rem' }}>
+                      {String(todoItem.priority || 'medium').toUpperCase()}
+                      {todoItem.dueDate ? ` • Due ${todoItem.dueDate}` : ''}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => completeTodo(todoItem)}
+                  >
+                    Done
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {isCheat ? (
           <div className="cheat-day-message">
@@ -650,9 +679,9 @@ function Home({ user, userData, isPreview = false }) {
                   <div className="empty-icon">📋</div>
                   <h3>No habits yet</h3>
                   <p>Add habits from the Habits page to get started</p>
-                  <a href="/habits" className="btn btn-primary" style={{ marginTop: '1rem', textDecoration: 'none' }}>
+                  <Link to="/habytarc/habits" className="btn btn-primary" style={{ marginTop: '1rem', textDecoration: 'none' }}>
                     Add Your First Habit
-                  </a>
+                  </Link>
                 </div>
               ) : visibleHabits.length === 0 ? (
                 <div className="empty-state">
@@ -661,14 +690,11 @@ function Home({ user, userData, isPreview = false }) {
                   <p>Completed, skipped, and moved habits are hidden from the Home list.</p>
                 </div>
               ) : (
-                visibleHabits.map((habit) => (
+                visibleHabitsWithSignals.map(({ habit, microHabit, habitRisk }) => (
                   <div
                     key={habit.id}
                     className={`habit-item ${todayTracking[habit.id] ? 'completed' : ''}`}
                   >
-                    <div className="habit-checkbox">
-                      {todayTracking[habit.id] && <span className="checkmark">✓</span>}
-                    </div>
                     <div className="habit-content">
                       <div className="habit-icon">{habit.icon}</div>
                       <div className="habit-details">
@@ -679,6 +705,11 @@ function Home({ user, userData, isPreview = false }) {
                           {todayStatus[habit.id] === 'skipped' ? ' • Skipped today' : ''}
                           {todayStatus[habit.id] === 'rescheduled' ? ' • Moved to pending' : ''}
                         </span>
+                        <div style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', marginTop: '0.2rem' }}>
+                          Tiny version: {microHabit.label}
+                          {microHabit.adjusted ? ' • Auto-adjusted for consistency' : ''}
+                          {habitRisk === 'high' ? ' • At risk today' : habitRisk === 'medium' ? ' • Needs attention' : ''}
+                        </div>
                       </div>
                     </div>
                     <div className="habit-actions">
@@ -689,6 +720,13 @@ function Home({ user, userData, isPreview = false }) {
                         disabled={isCheat}
                       >
                         {todayTracking[habit.id] ? 'Undo' : 'Done'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => completeMicroHabit(habit)}
+                      >
+                        Tiny Win
                       </button>
                       <button
                         type="button"
@@ -714,6 +752,16 @@ function Home({ user, userData, isPreview = false }) {
                       >
                         Cheat Day
                       </button>
+                      {!streakInsuranceUsed && (streakMap[habit.id] || 0) > 0 && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => useStreakInsurance(habit)}
+                          disabled={insuranceLoading === `insurance-${habit.id}`}
+                        >
+                          Save Streak
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))
@@ -721,53 +769,7 @@ function Home({ user, userData, isPreview = false }) {
             </div>
           </div>
         )}
-
-        {!prioritizeTodo && todoSection}
-
-        {pendingTasks.length > 0 && (
-          <div className="chart-container home-section">
-            <h3 style={{ marginBottom: '0.75rem' }}>Pending Work ({pendingTasks.length})</h3>
-            <div className="home-list-stack">
-              {pendingTasks.map((task) => (
-                <div
-                  key={task.id}
-                  className="pending-item"
-                >
-                  <div>
-                    <strong>{task.habitName}</strong>
-                    <div className="pending-meta-row">
-                      <span className="pending-chip pending-chip-source">From {task.sourceDate}</span>
-                      <span className="pending-arrow">→</span>
-                      <span className="pending-chip pending-chip-due">Due {task.dueDate}</span>
-                    </div>
-                  </div>
-                  <div className="pending-actions">
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={() => resolveTask(task, 'done')}
-                      disabled={actionLoading === `pending-${task.id}-done`}
-                    >
-                      Done
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => resolveTask(task, 'skipped')}
-                      disabled={actionLoading === `pending-${task.id}-skipped`}
-                    >
-                      Skip
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
-      <Link to="/chat" className="home-ai-fab" aria-label="Open HabytARC AI">
-        AI
-      </Link>
     </div>
   );
 }

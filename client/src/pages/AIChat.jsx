@@ -35,7 +35,7 @@ const CHAT_ENDPOINT = API_BASE_URL ? `${API_BASE_URL}/api/chat` : '/api/chat';
 function AIChat({ user, userData, isPreview = false }) {
   const defaultAssistantMessage = {
     role: 'assistant',
-    text: 'I am HabytARC AI. Ask me anything about consistency, routines, or habit design.'
+    text: 'I am HabytARC AI. I can help with habits, routines, streak rescue missions, and the occasional motivational shake-up.'
   };
 
   const [input, setInput] = useState('');
@@ -108,9 +108,9 @@ function AIChat({ user, userData, isPreview = false }) {
     if (isPreview) {
       setMessages([
         defaultAssistantMessage,
-        { role: 'assistant', text: 'Preview mode: I can show how chat looks, but actions are locked until login.' },
+        { role: 'assistant', text: 'Preview mode: I can still talk, but the buttons are on vacation until you log in.' },
         { role: 'user', text: 'Can you help me recover my streak?' },
-        { role: 'assistant', text: 'Yes. In full mode, I suggest one tiny restart action and track it with your daily progress.' }
+        { role: 'assistant', text: 'Absolutely. No dramatic comeback arc needed, just one tiny win and we start rebuilding from there.' }
       ]);
       setActiveHabits([
         { id: 'p1', name: 'Morning Walk' },
@@ -374,7 +374,7 @@ function AIChat({ user, userData, isPreview = false }) {
         <div className="page-header">
           <div>
             <h1>HabytARC AI</h1>
-            <p className="page-subtitle">Ask habit questions and get practical guidance</p>
+            <p className="page-subtitle">Ask for habit help, streak rescue, or a smarter nudge with a little personality</p>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <button type="button" className={`btn ${temporaryMode ? 'btn-primary' : 'btn-secondary'}`} onClick={toggleTemporaryMode} disabled={sending || clearing}>

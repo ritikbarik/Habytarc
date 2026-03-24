@@ -7,7 +7,6 @@ import Habits from './Habits';
 import Todo from './Todo';
 import AIChat from './AIChat';
 import Profile from './Profile';
-import Feedback from './Feedback';
 import Navigation from '../components/Navigation';
 
 const previewUser = {
@@ -76,7 +75,6 @@ function Peek() {
               />
             }
           />
-          <Route path="/connect" element={<Feedback isPreview />} />
         </Routes>
       </div>
     </div>

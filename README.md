@@ -1,20 +1,34 @@
-# HabytARC
+# HabytARC V3
 
-HabytARC is a React + Firebase productivity app for habits, to-dos, calendar tracking, AI chat, and exam preparation.
+HabytARC V3 is the third version of HabytARC: a React + Firebase productivity system split into two focused spaces:
 
-## What It Includes
+- `HabytARC` for habits, progress, to-dos, calendar, stats, profile, and AI chat
+- `Zenvy` for exam preparation, syllabus tracking, and study material management
 
-- Habit tracking with streak-aware progress
-- To-do management
-- Calendar and stats views
-- AI chat with provider-based backend
-- Exam Mode for:
-  - subject-wise syllabus management
-  - AI syllabus extraction from text, images, and PDFs
-  - unit/chapter-wise topic grouping
-  - study material tracking
-  - cloud-backed file uploads with Firebase Storage
-  - in-app file preview with full-screen support
+## Core Highlights
+
+- Minimal habit-first home dashboard focused on progress and today’s habits
+- Habit creation with optional advanced settings like reminders, micro-habits, adaptive mode, and context preferences
+- To-do management with reminders, recurrence, subtasks, and advanced options
+- Calendar and analytics views for streaks, consistency, and progress trends
+- Playful AI chat for habit guidance, streak recovery, and quick habit actions
+- Post-login workspace choice between HabytARC and Zenvy
+
+## Zenvy Exam Mode
+
+Zenvy includes:
+
+- subject-based exam planning
+- manual syllabus entry or AI extraction from pasted text, images, and PDFs
+- unit-wise or chapter-wise syllabus grouping
+- topic tracking with progress inside each subject
+- study material links, YouTube links, and local browser-stored file attachments
+- in-app preview for supported files with fullscreen mode
+
+Note:
+
+- Uploaded study materials are currently stored in the local browser, not cloud storage.
+- Links and metadata can still be saved with the subject data.
 
 ## Tech Stack
 
@@ -23,8 +37,8 @@ HabytARC is a React + Firebase productivity app for habits, to-dos, calendar tra
 - Vite
 - Firebase Auth
 - Firestore
-- Firebase Storage
-- Node.js AI API server
+- Firebase Cloud Messaging for push notifications
+- Node.js AI backend
 
 ## Project Structure
 
@@ -32,49 +46,42 @@ HabytARC is a React + Firebase productivity app for habits, to-dos, calendar tra
 HabytARC/
 |- client/
 |  |- public/
-|  |- src/
-|  |  |- components/
-|  |  |- config/
-|  |  |- pages/
-|  |  `- utils/
+|  `- src/
+|     |- components/
+|     |- config/
+|     |- pages/
+|     |- styles/
+|     `- utils/
 |- server.mjs
 |- firestore.rules
-|- storage.rules
 |- firebase.json
 |- .env.example
 `- package.json
 ```
 
-## Prerequisites
-
-- Node.js 18+
-- npm
-- A Firebase project
-- At least one AI provider key if you want AI chat or syllabus extraction
-
 ## Setup
 
-1. Install dependencies:
+1. Install dependencies
 
 ```bash
 npm install
 ```
 
-2. Configure Firebase client settings in [client/src/config/firebase.js](./client/src/config/firebase.js).
+2. Configure Firebase in [client/src/config/firebase.js](./client/src/config/firebase.js)
 
-3. Create a local `.env` from `.env.example` if you want the AI backend:
+3. Create a local `.env` file
 
 ```bash
 copy .env.example .env
 ```
 
-4. In `.env`, keep only one `AI_PROVIDER` line.
-
-5. If the frontend should call the local AI server, set:
+4. Point the frontend to the backend during development
 
 ```env
 VITE_AI_API_BASE_URL=http://localhost:8787
 ```
+
+5. Keep only one active AI provider in `.env`
 
 ## Run Locally
 
@@ -90,66 +97,47 @@ Backend:
 npm run dev:api
 ```
 
-Default URLs:
+Default local URLs:
 
 - Frontend: `http://localhost:5173`
 - Backend: `http://localhost:8787`
 
-## AI Provider Notes
+## AI Providers
 
-Supported providers:
+Supported:
 
-- `openai`
 - `gemini`
+- `openai`
 - `ollama`
 - `cloudflare`
 
-Notes:
+Current notes:
 
-- Gemini is the most complete path for uploaded image/PDF syllabus extraction.
-- PDFs are also parsed locally before AI structuring, which improves reliability.
-- Cloudflare and Ollama are more limited for direct uploaded-file extraction.
-- After changing `.env`, restart the backend.
+- Gemini is the strongest path for syllabus extraction from uploaded PDFs and images
+- PDFs are also parsed locally before AI structuring
+- if you change `.env`, restart the backend
 
-## Exam Mode
+## Firestore Rules
 
-Exam Mode lets users:
-
-- create subjects
-- add syllabus manually or via AI extraction
-- keep topics grouped by unit/module/chapter
-- mark syllabus items as done, skipped, or pending
-- upload study materials or attach links/YouTube resources
-- store uploaded study materials in Firebase Storage
-- open PDFs, images, text files, Office links, and YouTube resources inside the app
-
-## Firebase Deployment
-
-Deploy Firestore rules:
+Deploy the rules in this repo with:
 
 ```bash
 firebase deploy --only firestore:rules
 ```
 
-Deploy Storage rules:
-
-```bash
-firebase deploy --only storage
-```
-
-Storage uploads for study materials and syllabus files will not work correctly until Storage rules are deployed.
+This is important for authenticated app data and the newer public/accountability collections if you still use those features in older preview paths.
 
 ## Push Notifications
 
-For reminder notifications after deployment:
+To support due reminders and push notifications:
 
 1. Set `VITE_FIREBASE_VAPID_KEY`
-2. Set backend values in `.env`:
+2. Add these backend values in `.env`
    - `PUSH_CRON_SECRET`
    - `FIREBASE_PROJECT_ID`
    - `FIREBASE_CLIENT_EMAIL`
    - `FIREBASE_PRIVATE_KEY`
-3. Call this endpoint from a cron job:
+3. Trigger:
 
 ```text
 POST /api/push/run-due-reminders
@@ -158,14 +146,22 @@ Header: X-Cron-Secret: <PUSH_CRON_SECRET>
 
 ## Scripts
 
-- `npm run dev` - start Vite frontend
-- `npm run dev:api` - start AI API server
-- `npm run build` - create production build
-- `npm run preview` - preview production build
+- `npm run dev` starts the Vite frontend
+- `npm run dev:api` starts the AI backend
+- `npm run build` creates the production build
+- `npm run preview` previews the production build
 
-## Important Notes
+## Current Product Direction
 
-- Keep secrets out of version control.
-- Uploaded files now use Firebase Storage for cloud access.
-- Older browser-local files may still appear for backward compatibility.
-- If UI changes do not appear during development, restart `npm run dev` and hard refresh the browser.
+HabytARC V3 is designed to feel cleaner and more focused than the earlier versions:
+
+- less clutter on the home page
+- advanced settings hidden until needed
+- separated exam workspace
+- more human AI chat tone
+
+## Notes
+
+- Keep API keys and secrets out of version control
+- If UI changes do not show in development, restart `npm run dev` and hard refresh the browser
+- Some older leftover Firebase Storage settings may still exist in config, but current study material uploads use the browser-local fallback

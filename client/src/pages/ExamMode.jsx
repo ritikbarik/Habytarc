@@ -5,7 +5,6 @@ import {
   subscribeToExamSubjects,
   updateExamSubject
 } from '../utils/firebaseService';
-import { deleteCloudFile } from '../utils/cloudFileStorage';
 import { deleteLocalFile, getLocalFileEntry, getLocalFileUrl, saveLocalFile } from '../utils/localFileVault';
 
 const AI_API_BASE_URL = String(import.meta.env.VITE_AI_API_BASE_URL || '').trim();
@@ -184,6 +183,10 @@ function ExamMode({ user }) {
   const [materialDraft, setMaterialDraft] = useState(emptyMaterialDraft);
   const [materialFile, setMaterialFile] = useState(null);
   const [savingMaterial, setSavingMaterial] = useState(false);
+  const [materialUploadProgress, setMaterialUploadProgress] = useState(0);
+  const [materialUploadStatus, setMaterialUploadStatus] = useState('');
+  const [subjectUploadProgress, setSubjectUploadProgress] = useState(0);
+  const [subjectUploadStatus, setSubjectUploadStatus] = useState('');
   const [previewTarget, setPreviewTarget] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [previewError, setPreviewError] = useState('');
@@ -369,6 +372,8 @@ function ExamMode({ user }) {
     setExtracting(false);
     setExtractProgress(0);
     setExtractStatus('');
+    setSubjectUploadProgress(0);
+    setSubjectUploadStatus('');
   };
 
   const createSubject = async () => {
@@ -380,10 +385,14 @@ function ExamMode({ user }) {
     }
 
     setCreating(true);
+    setSubjectUploadProgress(0);
+    setSubjectUploadStatus('');
     try {
       let syllabusSource = null;
       if (subjectSourceFile) {
+        setSubjectUploadStatus('Saving syllabus file locally...');
         const localMeta = await saveLocalFile(subjectSourceFile, user.uid);
+        setSubjectUploadProgress(100);
         syllabusSource = {
           id: makeId('syllabus_source'),
           title: subjectSourceFile.name || 'Syllabus file',
@@ -428,6 +437,8 @@ function ExamMode({ user }) {
       alert(error?.message || 'Failed to create subject.');
     } finally {
       setCreating(false);
+      setSubjectUploadProgress(0);
+      setSubjectUploadStatus('');
     }
   };
 
@@ -460,7 +471,16 @@ function ExamMode({ user }) {
           fileKind
         })
       });
-      const data = await response.json();
+      const raw = await response.text();
+      let data = null;
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        data = null;
+      }
+      if (!data) {
+        throw new Error('AI server returned an invalid response. Check the API server and try again.');
+      }
       if (!response.ok) {
         throw new Error(data?.error || 'Failed to extract syllabus.');
       }
@@ -566,9 +586,6 @@ function ExamMode({ user }) {
   const removeSyllabusSource = async (sourceId) => {
     if (!activeSubject) return;
     const source = (activeSubject.syllabusSources || []).find((item) => item.id === sourceId);
-    if (source?.storagePath) {
-      await deleteCloudFile(source.storagePath).catch(() => {});
-    }
     if (source?.localFileId) {
       await deleteLocalFile(source.localFileId).catch(() => {});
     }
@@ -584,10 +601,14 @@ function ExamMode({ user }) {
     }
 
     setSavingMaterial(true);
+    setMaterialUploadProgress(0);
+    setMaterialUploadStatus('');
     try {
       let localMeta = null;
       if (materialFile) {
+        setMaterialUploadStatus('Saving material locally...');
         localMeta = await saveLocalFile(materialFile, user.uid);
+        setMaterialUploadProgress(100);
       }
 
       const nextMaterials = [
@@ -597,12 +618,12 @@ function ExamMode({ user }) {
           title: materialDraft.title.trim(),
           description: materialDraft.description.trim(),
           type: materialDraft.type,
-          link: materialDraft.link.trim(),
           youtubeLink: materialDraft.youtubeLink.trim(),
           syllabusItemIds: materialDraft.selectedSyllabusIds,
           status: 'pending',
           localFileId: localMeta?.id || '',
           storagePath: '',
+          link: materialDraft.link.trim(),
           fileName: localMeta?.name || '',
           mimeType: localMeta?.type || '',
           sizeBytes: localMeta?.size || 0,
@@ -614,8 +635,15 @@ function ExamMode({ user }) {
       await saveSubjectPatch(activeSubject.id, { materials: nextMaterials });
       setMaterialDraft(emptyMaterialDraft);
       setMaterialFile(null);
+      setMaterialUploadProgress(0);
+      setMaterialUploadStatus('');
+    } catch (error) {
+      console.error('Failed to add material:', error);
+      alert(error?.message || 'Failed to add material.');
     } finally {
       setSavingMaterial(false);
+      setMaterialUploadProgress(0);
+      setMaterialUploadStatus('');
     }
   };
 
@@ -630,9 +658,6 @@ function ExamMode({ user }) {
   const removeMaterial = async (materialId) => {
     if (!activeSubject) return;
     const material = (activeSubject.materials || []).find((item) => item.id === materialId);
-    if (material?.storagePath) {
-      await deleteCloudFile(material.storagePath).catch(() => {});
-    }
     if (material?.localFileId) {
       await deleteLocalFile(material.localFileId).catch(() => {});
     }
@@ -701,9 +726,7 @@ function ExamMode({ user }) {
     if (!window.confirm(`Delete ${subject.name}?`)) return;
     try {
       await Promise.all([
-        ...(subject.materials || []).map((item) => item?.storagePath ? deleteCloudFile(item.storagePath).catch(() => {}) : Promise.resolve()),
         ...(subject.materials || []).map((item) => item?.localFileId ? deleteLocalFile(item.localFileId).catch(() => {}) : Promise.resolve()),
-        ...(subject.syllabusSources || []).map((item) => item?.storagePath ? deleteCloudFile(item.storagePath).catch(() => {}) : Promise.resolve()),
         ...(subject.syllabusSources || []).map((item) => item?.localFileId ? deleteLocalFile(item.localFileId).catch(() => {}) : Promise.resolve())
       ]);
       await deleteExamSubject(user.uid, subject.id);
@@ -773,10 +796,10 @@ function ExamMode({ user }) {
   return (
     <div className="page-container">
       <div className="page-content">
-        <div className="page-header">
+        <div className="page-header exam-page-header">
           <div>
-            <h1>Exam Mode</h1>
-            <p className="page-subtitle">Plan syllabus, study materials, question banks, and PYQs in one place</p>
+            <h1>Zenvy</h1>
+            <p className="page-subtitle">Plan syllabus units and study materials in one dedicated exam workspace</p>
           </div>
           <button
             type="button"
@@ -846,7 +869,7 @@ function ExamMode({ user }) {
                       <h2>{activeSubject.name}</h2>
                       <p className="page-subtitle">{activeSubject.examName || 'Exam workspace'}</p>
                     </div>
-                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <div className="exam-subject-actions">
                       <button
                         type="button"
                         className="btn btn-secondary"
@@ -930,7 +953,7 @@ function ExamMode({ user }) {
                                 <div className="exam-meta-row">
                                   <span className="badge">{source.mimeType?.startsWith('image/') ? 'Image' : source.mimeType === 'application/pdf' ? 'PDF' : 'File'}</span>
                                   {source.fileName ? <span className="badge">{source.fileName} • {formatBytes(source.sizeBytes)}</span> : null}
-                                  {source.storagePath ? <span className="badge">Cloud file</span> : null}
+                                  {source.isLocalOnly ? <span className="badge">Local browser file</span> : null}
                                 </div>
                               </div>
                               <div className="exam-actions">
@@ -1079,6 +1102,14 @@ function ExamMode({ user }) {
                         <div className="form-group">
                           <label>Upload File</label>
                           <input type="file" onChange={(e) => setMaterialFile(e.target.files?.[0] || null)} />
+                          {savingMaterial && materialFile ? (
+                            <div className="exam-task-progress">
+                              <div className="exam-task-progress-bar">
+                                <span style={{ width: `${materialUploadProgress}%` }} />
+                              </div>
+                              <p>{materialUploadStatus || 'Uploading material...'} {materialUploadProgress}%</p>
+                            </div>
+                          ) : null}
                         </div>
                         <div className="form-group exam-syllabus-linker">
                           <label>Link to syllabus topic(s)</label>
@@ -1139,7 +1170,6 @@ function ExamMode({ user }) {
                                           <span key={`${material.id}_${unit}`} className="badge">{unit}</span>
                                         ))}
                                         {material.fileName ? <span className="badge">{material.fileName} • {formatBytes(material.sizeBytes)}</span> : null}
-                                        {material.storagePath ? <span className="badge">Cloud file</span> : null}
                                         {material.isLocalOnly ? <span className="badge">Local browser file</span> : null}
                                       </div>
                                       {material.description ? <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)' }}>{material.description}</p> : null}
@@ -1277,6 +1307,14 @@ function ExamMode({ user }) {
                     {creating ? 'Creating...' : 'Create Subject'}
                   </button>
                 </div>
+                {creating && subjectSourceFile ? (
+                  <div className="exam-task-progress">
+                    <div className="exam-task-progress-bar">
+                      <span style={{ width: `${subjectUploadProgress}%` }} />
+                    </div>
+                    <p>{subjectUploadStatus || 'Uploading syllabus file...'} {subjectUploadProgress}%</p>
+                  </div>
+                ) : null}
                 {syllabusEntryMode === 'ai' && (
                   <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
                     AI extraction fills the syllabus box first. Review and modify it before creating the subject.
